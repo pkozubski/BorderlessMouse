@@ -23,9 +23,13 @@ security unlock-keychain -p "$SIGNING_KEYCHAIN_PASSWORD" "$SIGNING_KEYCHAIN"
 security import "$SIGNING_ARCHIVE" -k "$SIGNING_KEYCHAIN" -P "$MACOS_SIGNING_P12_PASSWORD" -T /usr/bin/codesign
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$SIGNING_KEYCHAIN_PASSWORD" "$SIGNING_KEYCHAIN" > /dev/null
 # Zaufanie tylko do podpisywania kodu, tylko na jednorazowym runnerze. Nie zmieniamy ustawień użytkowników aplikacji.
-sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$SIGNING_KEYCHAIN" "$SIGNING_CERT"
+sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$SIGNING_CERT"
+security list-keychains -d user -s "$SIGNING_KEYCHAIN"
 
 SIGNING_FINGERPRINT=$(/usr/bin/openssl x509 -inform DER -in "$SIGNING_CERT" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')
+security verify-cert -c "$SIGNING_CERT" -p codeSign
+security find-identity -p codesigning "$SIGNING_KEYCHAIN"
+security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" | grep -F "$SIGNING_FINGERPRINT"
 {
   echo "SIGN_IDENTITY=$SIGNING_FINGERPRINT"
   echo "SIGN_KEYCHAIN=$SIGNING_KEYCHAIN"
