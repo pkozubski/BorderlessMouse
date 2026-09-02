@@ -58,7 +58,9 @@ public static class Autostart
             {
                 var value = ReadValue();
                 if (string.IsNullOrEmpty(value)) return "Wyłączony.";
-                return value.Contains(ExecutablePath ?? "", StringComparison.OrdinalIgnoreCase)
+                var exe = ExecutablePath;
+                if (string.IsNullOrEmpty(exe)) return "Włączony (nie można ustalić ścieżki bieżącego pliku exe).";
+                return value.Contains(exe, StringComparison.OrdinalIgnoreCase)
                     ? "Włączony (wpis w rejestrze, klucz Run użytkownika)."
                     : "Włączony, ale wpis wskazuje inny plik – zostanie poprawiony przy następnej zmianie.";
             }

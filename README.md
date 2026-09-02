@@ -15,6 +15,8 @@ Scenariusz, na który jest zbudowana ta wersja:
 * **Mac → Windows**: cały dźwięk systemowy Maca gra na słuchawkach/głośnikach Windowsa.
 * **Schowek w obie strony**: skopiowany tekst pojawia się w schowku drugiego komputera
   w ok. 0,5 s (bez przełączania kursora).
+* **Autostart**: obie aplikacje mogą uruchamiać się przy logowaniu i czekać w tle
+  (pasek menu / zasobnik).
 
 ```
 ┌──────────────── Windows ────────────────┐        ┌──────────────── macOS ─────────────────┐
@@ -51,6 +53,25 @@ Gotowe pliki są w [GitHub Releases](https://github.com/pkozubski/BorderlessMous
 Wydania są podpisane ad-hoc (bez konta Apple Developer), więc przy pierwszym uruchomieniu na
 Macu trzeba kliknąć aplikację prawym przyciskiem → **Otwórz**, a na Windowsie potwierdzić
 ostrzeżenie SmartScreen.
+
+## Autostart
+
+Przełącznik **Uruchamiaj przy logowaniu** jest w karcie „Ustawienia” (macOS) i w grupie
+„Uruchamianie” (Windows). Stan jest czytany z systemu, więc zgadza się z tym, co widać
+w ustawieniach systemowych, nawet po ręcznej zmianie.
+
+| | Mechanizm | Gdzie to widać |
+|---|---|---|
+| macOS | `SMAppService.mainApp` (element logowania). Gdy system go odrzuci, aplikacja instaluje LaunchAgent w `~/Library/LaunchAgents/com.borderlessmouse.mac.login.plist`. | Ustawienia systemowe → Ogólne → Elementy logowania |
+| Windows | Wpis `BorderlessMouse` w `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (bez uprawnień administratora). | Menedżer zadań → Aplikacje autostartu |
+
+Przy starcie z logowania aplikacja domyślnie nie otwiera okna: macOS pokazuje tylko ikonę
+w pasku menu, Windows tylko ikonę w zasobniku (można to wyłączyć obok przełącznika
+autostartu). Wpis autostartu jest automatycznie poprawiany, jeśli plik aplikacji zmieni
+ścieżkę, np. po przeniesieniu folderu.
+
+Diagnostyka: `BorderlessMouse.app/Contents/MacOS/BorderlessMouse --login-item-test` włącza
+autostart, wypisuje użyty mechanizm i przywraca poprzedni stan.
 
 ## Auto-updater
 
@@ -153,7 +174,8 @@ Rozwiązania:
 
 Interfejs używa FluentAvalonia (WinUI 3 look: `AppWindow`, `SettingsExpander`, `InfoBar`, Mica na
 Windows 11, motyw i kolor akcentu z systemu). Tryb diagnostyczny `BorderlessMouse.exe --screenshot
-plik.png` renderuje okno do PNG i kończy działanie.
+plik.png` renderuje okno do PNG (druga klatka `plik-bottom.png` pokazuje dół strony) i kończy
+działanie.
 
 ```powershell
 cd windows\BorderlessMouse
@@ -172,7 +194,7 @@ macos/
   build.sh                   – build bez Xcode
   project.yml                – XcodeGen
   BorderlessMouse/Sources/
-    App/        Engine (logika), AppState (UI), Settings, ClipboardSync, Updater, wejście aplikacji
+    App/        Engine (logika), AppState (UI), Settings, ClipboardSync, Updater, LoginItem, wejście aplikacji
     Network/    ControlServer (TCP), DiscoveryResponder (UDP), AudioSender (UDP)
     Input/      InputInjector (CGEvent), KeyMap (scancode → kVK)
     Audio/      SystemAudioTap (Core Audio process tap)
@@ -182,6 +204,7 @@ assets/logo/                 – wspólne logo + skrypt generujący .icns/.ico/.
 windows/
   BorderlessMouse/
     Input/      NativeMethods, LowLevelHooks, NativeInputWindow (Raw Input + hider), InputCapture
+    Models/     Settings, Autostart (klucz Run w rejestrze)
     Net/        ControlClient (TCP), Discovery (UDP), AudioReceiver (UDP), ClipboardSync, Updater
     Audio/      JitterBufferProvider, AudioPlayer (NAudio/WASAPI)
     Views/      MainWindow.axaml (AppWindow + SettingsExpander)
