@@ -48,7 +48,18 @@ final class AppState: ObservableObject {
     private var updaterSink: AnyCancellable?
     private let logger = Logger(subsystem: "com.borderlessmouse.mac", category: "app")
 
-    private init() {
+    /// Stan bez sieci i uprawnień, wypełniony przykładowymi danymi – tylko dla
+    /// podglądu interfejsu (`--ui-preview`).
+    static func demo() -> AppState {
+        let state = AppState(preview: true)
+        state.fillWithDemoData()
+        return state
+    }
+
+    private let isPreview: Bool
+
+    private init(preview: Bool = false) {
+        isPreview = preview
         let s = Settings.load()
         settings = s
         engine = Engine(config: s.engineConfig)
@@ -59,6 +70,7 @@ final class AppState: ObservableObject {
         settings.launchAtLogin = LoginItem.isEnabled
         LoginItem.refreshIfNeeded()
         accessibilityGranted = InputInjector.isAccessibilityTrusted
+        guard !preview else { return }
         engine.setAccessibilityGranted(accessibilityGranted)
         engine.start()
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -93,7 +105,30 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func fillWithDemoData() {
+        isListening = true
+        peer = ControlServer.PeerInfo(name: "PC-BIURO", address: "192.168.1.42")
+        cursorOnMac = true
+        accessibilityGranted = true
+        audioStreaming = true
+        audioDescription = "48000 Hz · stereo · 16-bit → 192.168.1.42:47802"
+        audioLevel = 0.42
+        audioPackets = 18_432
+        clipboardStatus = "Wysłano 128 zn. do Windowsa · 21:40:12"
+        loginItemStatus = LoginItem.statusDescription
+        log = [
+            LogEntry(time: Date().addingTimeInterval(-95), text: "Nasłuchiwanie TCP na porcie 47800"),
+            LogEntry(time: Date().addingTimeInterval(-80), text: "Discovery UDP nasłuchuje na porcie 47801"),
+            LogEntry(time: Date().addingTimeInterval(-42), text: "Połączono: PC-BIURO (192.168.1.42)"),
+            LogEntry(time: Date().addingTimeInterval(-20), text: "Audio: 48000 Hz · stereo · 16-bit, bufor 256 ramek"),
+            LogEntry(time: Date().addingTimeInterval(-4), text: "Kursor przeszedł na Maca"),
+        ]
+    }
+
+    func clearLog() { log.removeAll() }
+
     private func applyLaunchAtLogin(_ enabled: Bool) {
+        guard !isPreview else { return }
         do {
             let mechanism = try LoginItem.setEnabled(enabled)
             loginItemError = nil

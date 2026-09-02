@@ -73,6 +73,23 @@ autostartu). Wpis autostartu jest automatycznie poprawiany, jeśli plik aplikacj
 Diagnostyka: `BorderlessMouse.app/Contents/MacOS/BorderlessMouse --login-item-test` włącza
 autostart, wypisuje użyty mechanizm i przywraca poprzedni stan.
 
+## Interfejs
+
+Aplikacja na Macu jest w całości w SwiftUI i korzysta ze standardowych komponentów:
+`NavigationSplitView` z paskiem bocznym oraz `Form` w stylu `.grouped` z sekcjami,
+`LabeledContent` i dwuwierszowymi `Toggle`. Efekt jest taki, że okno wygląda jak Ustawienia
+systemowe i automatycznie przejmuje wygląd systemu, w tym jasny i ciemny motyw oraz nowy
+wygląd macOS 26.
+
+Wersja Windows używa FluentAvalonia, czyli komponentów WinUI 3 (`AppWindow`,
+`SettingsExpander`, `InfoBar`, Mica), więc analogicznie wygląda jak Ustawienia Windows 11.
+Obie aplikacje mają ten sam układ treści i to samo logo, ale każda trzyma się wyglądu
+swojego systemu.
+
+Podgląd wyglądu bez uruchamiania sieci i uprawnień:
+`BorderlessMouse --ui-preview zrzut.png [panel]`, gdzie panel to `connection`, `input`,
+`audio`, `clipboard`, `startup`, `updates` lub `log`.
+
 ## Auto-updater
 
 Obie aplikacje sprawdzają najnowsze wydanie na GitHubie (5 s po starcie i co 6 godzin, można
@@ -194,11 +211,11 @@ macos/
   build.sh                   – build bez Xcode
   project.yml                – XcodeGen
   BorderlessMouse/Sources/
-    App/        Engine (logika), AppState (UI), Settings, ClipboardSync, Updater, LoginItem, wejście aplikacji
+    App/        Engine (logika), AppState (UI), Settings, ClipboardSync, Updater, LoginItem, UIPreview
     Network/    ControlServer (TCP), DiscoveryResponder (UDP), AudioSender (UDP)
     Input/      InputInjector (CGEvent), KeyMap (scancode → kVK)
     Audio/      SystemAudioTap (Core Audio process tap)
-    Views/      SwiftUI (karty, pasek menu)
+    Views/      ContentView (pasek boczny), Panes (formularze), pasek menu
 assets/logo/                 – wspólne logo + skrypt generujący .icns/.ico/.png
 .github/workflows/           – CI (build obu aplikacji) i Release (tag v* → GitHub Release)
 windows/

@@ -12,14 +12,17 @@ struct BorderlessMouseApp: App {
         if CommandLine.arguments.contains("--login-item-test") {
             LoginItem.runDiagnostics()
         }
+        if CommandLine.arguments.contains("--ui-preview") {
+            UIPreview.run()
+        }
     }
 
     var body: some Scene {
         Window("BorderlessMouse", id: "main") {
             ContentView().environmentObject(state)
         }
-        .windowResizability(.contentSize)
-        .defaultSize(width: 560, height: 860)
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 920, height: 660)
 
         MenuBarExtra {
             MenuBarView().environmentObject(state)
