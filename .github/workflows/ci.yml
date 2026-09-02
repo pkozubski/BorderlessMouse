@@ -9,13 +9,15 @@ on:
 jobs:
   macos:
     name: macOS app (swiftc)
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Build universal .app
         run: |
+          xcodebuild -version
           cd macos
-          UNIVERSAL=1 VERSION=0.0.0 ./build.sh
+          # SDK 26+ jest wymagany, żeby na macOS 26 aplikacja miała nowy wygląd systemu
+          REQUIRE_SDK_MAJOR=26 UNIVERSAL=1 VERSION=0.0.0 ./build.sh
       - uses: actions/upload-artifact@v4
         with:
           name: BorderlessMouse-macOS-ci

@@ -17,7 +17,30 @@ BUILD_NUMBER="${BUILD_NUMBER:-1}"
 DEPLOY="14.2"
 BUNDLE_ID="com.borderlessmouse.mac"
 OUT="build/BorderlessMouse.app"
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+# SDK decyduje o wyglądzie: binarka zlinkowana z SDK macOS 26 dostaje na Tahoe nowy
+# wygląd systemu (szklane kontrolki), starsze SDK dają tryb kompatybilności.
+# Dlatego wybieramy najnowszy SDK spośród Command Line Tools i wszystkich Xcode.
+pick_sdk() {
+  local best="" best_ver="0"
+  for sdk in /Library/Developer/CommandLineTools/SDKs/MacOSX[0-9]*.sdk \
+             /Applications/Xcode*.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX[0-9]*.sdk; do
+    [ -d "$sdk" ] || continue
+    local ver
+    ver="$(basename "$sdk" | sed -E 's/MacOSX([0-9.]+)\.sdk/\1/')"
+    if [ "$(printf '%s\n%s\n' "$best_ver" "$ver" | sort -V | tail -1)" = "$ver" ] && [ "$ver" != "$best_ver" ]; then
+      best="$sdk"; best_ver="$ver"
+    fi
+  done
+  if [ -z "$best" ]; then best="$(xcrun --sdk macosx --show-sdk-path)"; best_ver="$(xcrun --sdk macosx --show-sdk-version)"; fi
+  SDK="$best"; SDK_VERSION="$best_ver"
+}
+pick_sdk
+echo "→ SDK macOS $SDK_VERSION ($SDK)"
+if [ -n "${REQUIRE_SDK_MAJOR:-}" ] && [ "${SDK_VERSION%%.*}" -lt "$REQUIRE_SDK_MAJOR" ]; then
+  echo "✗ Wymagany SDK macOS ${REQUIRE_SDK_MAJOR}+, znaleziono ${SDK_VERSION}. Zainstaluj nowsze Xcode/Command Line Tools." >&2
+  exit 1
+fi
 
 OPT="-O"
 [ "$CONFIG" = "debug" ] && OPT="-Onone -g"
@@ -60,4 +83,4 @@ echo "→ codesign ($SIGN_IDENTITY)"
 codesign --force --sign "$SIGN_IDENTITY" \
   --entitlements BorderlessMouse/BorderlessMouse.entitlements \
   "$OUT"
-echo "✓ $OUT (v$VERSION build $BUILD_NUMBER)"
+echo "✓ $OUT (v$VERSION build $BUILD_NUMBER, SDK $SDK_VERSION)"

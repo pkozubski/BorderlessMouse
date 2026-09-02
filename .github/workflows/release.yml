@@ -13,13 +13,16 @@ permissions:
 jobs:
   macos:
     name: macOS (universal .app)
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Build
         run: |
+          xcodebuild -version
           cd macos
-          UNIVERSAL=1 VERSION="${GITHUB_REF_NAME#v}" BUILD_NUMBER="${GITHUB_RUN_NUMBER}" ./build.sh
+          # SDK 26+ jest wymagany, żeby na macOS 26 aplikacja miała nowy wygląd systemu
+          REQUIRE_SDK_MAJOR=26 UNIVERSAL=1 VERSION="${GITHUB_REF_NAME#v}" BUILD_NUMBER="${GITHUB_RUN_NUMBER}" ./build.sh
+          echo "Zlinkowane SDK:"; otool -l build/BorderlessMouse.app/Contents/MacOS/BorderlessMouse | grep -A3 LC_BUILD_VERSION | grep sdk
           ditto -c -k --keepParent build/BorderlessMouse.app BorderlessMouse-macOS.zip
       - uses: actions/upload-artifact@v4
         with:

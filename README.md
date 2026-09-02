@@ -81,6 +81,11 @@ dziennik) z wierszami „tytuł + opis + kontrolka”. Na Macu to SwiftUI, na Wi
 z motywem FluentAvalonia (kontrolki WinUI 3, Mica, systemowy kolor akcentu), więc karty są
 wspólne, a przełączniki, listy i suwaki pochodzą z danego systemu.
 
+Wygląd kontrolek na Macu zależy od SDK, z którym zlinkowano aplikację: build z SDK macOS 26
+dostaje na Tahoe nowy wygląd systemu (szklane przełączniki, pigułkowe przyciski), starszy SDK
+daje tryb kompatybilności sprzed Tahoe. `build.sh` wybiera najnowszy SDK z Command Line Tools
+i Xcode, a CI buduje na `macos-26` z wymogiem `REQUIRE_SDK_MAJOR=26`.
+
 Podgląd wyglądu bez uruchamiania sieci i uprawnień:
 
 * macOS: `BorderlessMouse.app/Contents/MacOS/BorderlessMouse --ui-preview zrzut.png`
