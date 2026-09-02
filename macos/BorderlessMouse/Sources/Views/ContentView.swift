@@ -293,9 +293,9 @@ struct UpdatesCard: View {
             Divider()
             DisclosureGroup("Zaawansowane: podpisywanie aktualizacji", isExpanded: $showAdvanced) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Wydania z GitHuba są podpisane ad-hoc, więc macOS po aktualizacji zapomina uprawnienie Dostępność. Podaj nazwę własnego certyfikatu (Dostęp do pęku kluczy → Utwórz certyfikat → Podpisywanie kodu), a updater podpisze nim pobraną wersję i uprawnienia zostaną.")
+                    Text("Wydania od 1.3.4 używają stałego podpisu, aby zachować uprawnienia po aktualizacji. Przy przejściu ze starszej wersji może być potrzebna jeszcze jedna zgoda. Pole poniżej zostaw puste, chyba że używasz własnego certyfikatu do lokalnych buildów.")
                         .font(.caption).foregroundStyle(.secondary)
-                    TextField("np. BorderlessMouse Dev", text: $state.settings.codesignIdentity)
+                    TextField("Opcjonalny własny certyfikat", text: $state.settings.codesignIdentity)
                         .textFieldStyle(.roundedBorder)
                 }
                 .padding(.top, 6)

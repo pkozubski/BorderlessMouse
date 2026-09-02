@@ -4,7 +4,7 @@ import Foundation
 
 /// Auto-updater oparty o GitHub Releases: sprawdza najnowszy tag, pobiera
 /// `BorderlessMouse-macOS.zip`, weryfikuje SHA-256 (SHA256SUMS.txt),
-/// opcjonalnie podpisuje lokalnym certyfikatem i podmienia bundle.
+/// sprawdza stały certyfikat wydawcy, opcjonalnie podpisuje lokalnym certyfikatem i podmienia bundle.
 @MainActor
 final class Updater: ObservableObject {
     static let owner = "pkozubski"
@@ -114,21 +114,27 @@ final class Updater: ObservableObject {
                 Task { @MainActor in self?.state = .downloading(progress) }
             }
             state = .installing
-            if let checksumsURL = release.checksumsURL {
-                try await verifyChecksum(of: zipURL, against: checksumsURL)
-            }
+            guard let checksumsURL = release.checksumsURL else { throw UpdaterError.missingChecksum }
+            try await verifyChecksum(of: zipURL, against: checksumsURL)
             let staging = zipURL.deletingLastPathComponent().appendingPathComponent("unpacked", isDirectory: true)
             try? FileManager.default.removeItem(at: staging)
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
             try run("/usr/bin/ditto", ["-x", "-k", zipURL.path, staging.path])
             guard let newApp = try FileManager.default.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil)
                 .first(where: { $0.pathExtension == "app" }) else { throw UpdaterError.noAppInArchive }
+            guard let certificateURL = Bundle.main.url(forResource: "ReleaseSigning", withExtension: "cer") else {
+                throw ReleaseSignature.SignatureError.missingCertificate
+            }
+            try ReleaseSignature.verifyRelease(at: newApp, certificateURL: certificateURL)
             _ = try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", newApp.path])
-            let identity = codesignIdentity.trimmingCharacters(in: .whitespaces)
+            let identity = codesignIdentity.trimmingCharacters(in: .whitespacesAndNewlines)
             if !identity.isEmpty {
-                try run("/usr/bin/codesign", ["--force", "--deep", "--sign", identity,
-                                             "--entitlements", Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/BorderlessMouse.entitlements").path,
-                                             newApp.path], allowFailure: true)
+                // Nie wolno kontynuować po błędzie: utrata lokalnego podpisu zerwałaby zgodę TCC.
+                guard identity != "-" else { throw UpdaterError.adHocIdentity }
+                try run("/usr/bin/codesign", ["--force", "--sign", identity,
+                                             "--entitlements", newApp.appendingPathComponent("Contents/Resources/BorderlessMouse.entitlements").path,
+                                             newApp.path])
+                try ReleaseSignature.verify(at: newApp)
             }
             try swapAndRelaunch(newApp: newApp)
         } catch {
@@ -175,8 +181,10 @@ final class Updater: ObservableObject {
     private func verifyChecksum(of file: URL, against checksumsURL: URL) async throws {
         let (data, _) = try await URLSession.shared.data(from: checksumsURL)
         let text = String(decoding: data, as: UTF8.self)
-        guard let line = text.split(separator: "\n").first(where: { $0.hasSuffix(Self.assetName) }),
-              let expected = line.split(separator: " ").first else { return } // brak wpisu = nie weryfikujemy
+        guard let entry = text.split(separator: "\n").map({ $0.split(whereSeparator: { $0.isWhitespace }) })
+            .first(where: { $0.count == 2 && $0[1] == Self.assetName }),
+              let expected = entry.first,
+              expected.count == 64, expected.allSatisfy({ $0.isHexDigit }) else { throw UpdaterError.missingChecksum }
         let digest = SHA256.hash(data: try Data(contentsOf: file)).map { String(format: "%02x", $0) }.joined()
         guard digest == String(expected).lowercased() else { throw UpdaterError.checksumMismatch }
     }
@@ -208,17 +216,19 @@ final class Updater: ObservableObject {
     }
 
     @discardableResult
-    private func run(_ tool: String, _ args: [String], allowFailure: Bool = false) throws -> Int32 {
+    private func run(_ tool: String, _ args: [String]) throws -> Int32 {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tool)
         p.arguments = args
         let err = Pipe()
         p.standardError = err
-        p.standardOutput = Pipe()
+        p.standardOutput = err
         try p.run()
+        // Opróżniamy wspólny potok przed waitUntilExit, żeby narzędzie nie utknęło przy pełnym buforze.
+        let output = err.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        if p.terminationStatus != 0 && !allowFailure {
-            let msg = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        if p.terminationStatus != 0 {
+            let msg = String(decoding: output, as: UTF8.self)
             throw UpdaterError.tool(tool, msg.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return p.terminationStatus
@@ -228,7 +238,9 @@ final class Updater: ObservableObject {
         case http(Int)
         case malformed
         case noAppInArchive
+        case missingChecksum
         case checksumMismatch
+        case adHocIdentity
         case notWritable(String)
         case tool(String, String)
 
@@ -237,7 +249,9 @@ final class Updater: ObservableObject {
             case .http(let code): return "GitHub odpowiedział kodem \(code)"
             case .malformed: return "Nieoczekiwana odpowiedź GitHuba"
             case .noAppInArchive: return "W archiwum nie ma aplikacji"
+            case .missingChecksum: return "W wydaniu brakuje prawidłowej sumy SHA-256 dla aplikacji"
             case .checksumMismatch: return "Suma SHA-256 pobranego pliku nie zgadza się z wydaniem"
+            case .adHocIdentity: return "Podpis ad-hoc nie zachowuje uprawnień. Zostaw pole certyfikatu puste, aby użyć stałego podpisu wydawcy."
             case .notWritable(let path): return "Brak prawa zapisu do \(path) – przenieś aplikację np. do ~/Applications"
             case .tool(let tool, let msg): return "\(tool): \(msg)"
             }

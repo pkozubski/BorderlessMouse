@@ -50,9 +50,10 @@ Gotowe pliki są w [GitHub Releases](https://github.com/pkozubski/BorderlessMous
 * `BorderlessMouse-Windows-x64.exe` – pojedynczy plik, bez instalatora.
 * `SHA256SUMS.txt` – sumy kontrolne używane też przez updater.
 
-Wydania są podpisane ad-hoc (bez konta Apple Developer), więc przy pierwszym uruchomieniu na
-Macu trzeba kliknąć aplikację prawym przyciskiem → **Otwórz**, a na Windowsie potwierdzić
-ostrzeżenie SmartScreen.
+Od wersji 1.3.4 wydania macOS używają stałego certyfikatu projektu. Nie jest to certyfikat
+Apple Developer ID ani notaryzacja, więc przy pierwszym uruchomieniu nadal może być
+potrzebne **Otwórz** / **Otwórz mimo to** w ustawieniach macOS. Na Windowsie może pojawić
+się ostrzeżenie SmartScreen.
 
 ## Autostart
 
@@ -99,10 +100,13 @@ wyłączyć w karcie **Aktualizacje**). Aktualizacja jest pobierana, weryfikowan
 instalowana jednym kliknięciem, po czym aplikacja uruchamia się ponownie.
 
 * **Windows**: nowy plik exe podmienia bieżący po zamknięciu aplikacji (skrypt `swap.cmd` w `%TEMP%`).
-* **macOS**: bundle jest podmieniany w miejscu. Ponieważ wydania są podpisane ad-hoc, macOS po
-  aktualizacji zapomina uprawnienie Dostępność. Rozwiązanie: w karcie **Aktualizacje →
-  Zaawansowane** podaj nazwę własnego certyfikatu z pęku kluczy; updater podpisze nim pobraną
-  wersję i uprawnienia zostaną (jak utworzyć certyfikat: sekcja *Budowanie → macOS*).
+* **macOS**: bundle jest podmieniany w miejscu. Od wersji **1.3.4** kolejne wydania mają
+  stały podpis, aby macOS zachowywał uprawnienia Dostępność i nagrywania dźwięku.
+  Przy pierwszym przejściu ze starego podpisu ad-hoc może być potrzebne ponowne nadanie
+  zgód — to jednorazowa zmiana tożsamości aplikacji. Updater sprawdza podpis wydawcy
+  i SHA-256 przed podmianą. Pole **Aktualizacje → Zaawansowane → własny certyfikat**
+  pozostaw puste, jeśli korzystasz z wydań z GitHuba. Dla lokalnych buildów możesz nadal
+  używać własnego certyfikatu; błąd podpisywania zatrzymuje aktualizację.
 
 Nowe wydanie robi się jednym tagiem:
 
@@ -111,6 +115,15 @@ git tag v1.1.0 && git push --tags
 ```
 
 Workflow `.github/workflows/release.yml` buduje obie aplikacje, liczy sumy i publikuje release.
+
+Podpis macOS korzysta z `MACOS_SIGNING_P12_BASE64` i `MACOS_SIGNING_P12_PASSWORD` w GitHub
+Secrets. Publiczny certyfikat jest w `macos/BorderlessMouse/Resources/ReleaseSigning.cer`;
+klucz prywatny nie trafia do repozytorium ani artefaktów. Runner importuje klucz do
+tymczasowego pęku, a po pracy go usuwa. Brak certyfikatu przerywa wydanie zamiast wracać
+do ad-hoc. Certyfikatu nie należy regenerować dla kolejnych wersji.
+
+CI i wydanie sprawdzają zgodność podpisu dwóch różnych buildów oraz odrzucanie
+uszkodzonych, niepodpisanych i podpisanych ad-hoc aktualizacji.
 
 ## Uruchomienie krok po kroku
 

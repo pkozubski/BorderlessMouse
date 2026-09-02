@@ -35,7 +35,7 @@ struct Settings: Codable, Equatable {
     /// Przy starcie z logowania nie otwieraj okna – tylko ikona w pasku menu.
     var startHidden = true
     /// Nazwa certyfikatu w pęku kluczy, którym updater podpisze pobraną wersję
-    /// (żeby uprawnienia Dostępność przeżyły aktualizację). Puste = bez podpisywania.
+    /// (dla lokalnych buildów). Puste = zachowaj stały podpis wydawcy z GitHuba.
     var codesignIdentity = ""
 
     private static let key = "blm.settings"

@@ -12,6 +12,10 @@ cd "$(dirname "$0")"
 ARCH="${ARCH:-$(uname -m)}"
 CONFIG="${CONFIG:-release}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+if [ "${REQUIRE_STABLE_SIGNING:-0}" = "1" ] && [ "$SIGN_IDENTITY" = "-" ]; then
+  echo "✗ Wydanie wymaga stałego certyfikatu; podpis ad-hoc zerwałby uprawnienia macOS." >&2
+  exit 1
+fi
 VERSION="${VERSION:-1.0.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 DEPLOY="14.2"
@@ -56,7 +60,7 @@ compile() { # $1 = arch, $2 = output
     -target "$1-apple-macos${DEPLOY}" -sdk "$SDK" \
     -framework SwiftUI -framework AppKit -framework Network \
     -framework CoreAudio -framework AudioToolbox -framework CryptoKit \
-    -framework ServiceManagement \
+    -framework ServiceManagement -framework Security \
     -o "$2" $SOURCES
 }
 
@@ -78,9 +82,19 @@ sed -e "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/$BUNDLE_ID/g" \
     BorderlessMouse/Info.plist > "$OUT/Contents/Info.plist"
 printf 'APPL????' > "$OUT/Contents/PkgInfo"
 cp BorderlessMouse/Resources/AppIcon.icns BorderlessMouse/Resources/BorderlessMouse.entitlements "$OUT/Contents/Resources/"
+cp BorderlessMouse/Resources/ReleaseSigning.cer "$OUT/Contents/Resources/"
 
 echo "→ codesign ($SIGN_IDENTITY)"
-codesign --force --sign "$SIGN_IDENTITY" \
-  --entitlements BorderlessMouse/BorderlessMouse.entitlements \
-  "$OUT"
+SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --entitlements BorderlessMouse/BorderlessMouse.entitlements)
+if [ -n "${SIGN_KEYCHAIN:-}" ]; then SIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN"); fi
+if [ "${REQUIRE_STABLE_SIGNING:-0}" = "1" ]; then
+  CERT_HASH=$(/usr/bin/openssl x509 -inform DER -in BorderlessMouse/Resources/ReleaseSigning.cer -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')
+  SIGN_ARGS+=(--requirements "designated => identifier \"$BUNDLE_ID\" and anchor H\"$CERT_HASH\"")
+fi
+codesign "${SIGN_ARGS[@]}" "$OUT"
+codesign --verify --strict --deep --all-architectures "$OUT"
+if [ "${REQUIRE_STABLE_SIGNING:-0}" = "1" ]; then
+  codesign --verify --strict --all-architectures \
+    -R "identifier \"$BUNDLE_ID\" and anchor H\"$CERT_HASH\"" "$OUT"
+fi
 echo "✓ $OUT (v$VERSION build $BUILD_NUMBER, SDK $SDK_VERSION)"
