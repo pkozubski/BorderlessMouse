@@ -2,6 +2,7 @@
 # Tylko dla izolowanego runnera GitHub Actions. Klucz nigdy nie trafia do repozytorium ani artefaktów.
 set -euo pipefail
 [ "${GITHUB_ACTIONS:-}" = "true" ] || { echo "Ten skrypt jest przeznaczony dla GitHub Actions." >&2; exit 1; }
+[ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ] || { echo "Podpisywanie wymaga jednorazowego runnera GitHub-hosted." >&2; exit 1; }
 : "${MACOS_SIGNING_P12_BASE64:?Brak certyfikatu w GitHub Secrets}"
 : "${MACOS_SIGNING_P12_PASSWORD:?Brak hasła certyfikatu w GitHub Secrets}"
 : "${RUNNER_TEMP:?}"

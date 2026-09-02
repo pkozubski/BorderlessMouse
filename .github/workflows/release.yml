@@ -39,8 +39,9 @@ jobs:
           if-no-files-found: error
       - name: Remove temporary signing identity
         if: always()
+        timeout-minutes: 1
         run: |
-          sudo security remove-trusted-cert -d macos/BorderlessMouse/Resources/ReleaseSigning.cer || true
+          # Zaufanie do publicznego certyfikatu znika wraz z jednorazowym runnerem.
           security delete-keychain "$RUNNER_TEMP/borderlessmouse-signing.keychain-db" || true
           rm -f "$RUNNER_TEMP/borderlessmouse-signing.p12"
 

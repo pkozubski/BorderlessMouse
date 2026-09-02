@@ -89,12 +89,12 @@ SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --entitlements BorderlessMouse/Border
 if [ -n "${SIGN_KEYCHAIN:-}" ]; then SIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN"); fi
 if [ "${REQUIRE_STABLE_SIGNING:-0}" = "1" ]; then
   CERT_HASH=$(/usr/bin/openssl x509 -inform DER -in BorderlessMouse/Resources/ReleaseSigning.cer -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')
-  SIGN_ARGS+=(--requirements "designated => identifier \"$BUNDLE_ID\" and anchor H\"$CERT_HASH\"")
+  SIGN_ARGS+=(--requirements "=designated => identifier \"$BUNDLE_ID\" and anchor H\"$CERT_HASH\"")
 fi
 codesign "${SIGN_ARGS[@]}" "$OUT"
 codesign --verify --strict --deep --all-architectures "$OUT"
 if [ "${REQUIRE_STABLE_SIGNING:-0}" = "1" ]; then
   codesign --verify --strict --all-architectures \
-    -R "identifier \"$BUNDLE_ID\" and anchor H\"$CERT_HASH\"" "$OUT"
+    -R "=identifier \"$BUNDLE_ID\" and anchor H\"$CERT_HASH\"" "$OUT"
 fi
 echo "✓ $OUT (v$VERSION build $BUILD_NUMBER, SDK $SDK_VERSION)"

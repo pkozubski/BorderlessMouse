@@ -26,7 +26,7 @@ make_app() {
 PLIST
   printf '%s\n' "$version" > "$app/Contents/Resources/version.txt"
   codesign --force --sign "$SIGN_IDENTITY" --keychain "$SIGN_KEYCHAIN" \
-    --requirements "designated => identifier \"$identifier\" and anchor H\"$CERT_HASH\"" "$app"
+    --requirements "=designated => identifier \"$identifier\" and anchor H\"$CERT_HASH\"" "$app"
 }
 
 make_app first 1 com.borderlessmouse.mac
