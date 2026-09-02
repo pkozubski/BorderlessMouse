@@ -9,9 +9,11 @@ enum ProtocolConstants {
     static let discoveryReply = "BLM1!"
     static let audioMagic: UInt16 = 0x4D42
     /// Maksymalny rozmiar długiej ramki (ochrona przed błędnym nadawcą).
-    static let maxLongFrame = 4 * 1024 * 1024
+    static let maxLongFrame = maxClipboardImageBytes + 1
     /// Limit tekstu schowka.
     static let maxClipboardBytes = 1024 * 1024
+    static let maxClipboardImageBytes = 32 * 1024 * 1024
+    static let maxClipboardImagePixels = 64 * 1024 * 1024
 }
 
 enum MessageType: UInt8 {
@@ -35,6 +37,7 @@ enum MessageType: UInt8 {
 
 enum ClipboardFormat: UInt8 {
     case utf8Text = 0
+    case png = 1
 }
 
 enum ScreenEdge: UInt8, CaseIterable {
@@ -165,11 +168,8 @@ enum Frame {
         return Data(out)
     }
 
-    static func clipboard(text: String) -> Data {
-        var w = ByteWriter()
-        w.u8(ClipboardFormat.utf8Text.rawValue)
-        w.string(text)
-        return make(.clipboard, w.bytes)
+    static func clipboard(_ content: ClipboardContent) -> Data {
+        make(.clipboard, [content.format.rawValue] + content.data)
     }
 
     static func welcome(name: String) -> Data {

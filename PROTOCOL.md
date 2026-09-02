@@ -20,7 +20,7 @@ Mac odpowiada unicastem do nadawcy: `BLM1!` + `u16 tcpPort` + `nazwa`.
 
 Ramka: `u8 type`, `u8 len`, `len` bajtów payloadu. Jeśli `len == 0xFF`, to jest
 to **długa ramka**: po nagłówku następuje `u32 length`, a potem `length` bajtów
-payloadu (limit 4 MiB; payloady o długości ≥ 255 bajtów zawsze idą jako długie ramki).
+payloadu (limit 32 MiB + 1 bajt; payloady o długości ≥ 255 bajtów zawsze idą jako długie ramki).
 
 | Typ  | Nazwa        | Kierunek | Payload |
 |------|--------------|----------|---------|
@@ -39,7 +39,7 @@ payloadu (limit 4 MiB; payloady o długości ≥ 255 bajtów zawsze idą jako d�
 | 0x50 | PING         | obie     | `u64 ts` (dowolny znacznik nadawcy) |
 | 0x51 | PONG         | obie     | echo payloadu PING |
 | 0x60 | STATUS       | M → W    | `u8 flags` (bit0 Accessibility OK, bit1 audio przechwytywane, bit2 kursor na Macu) |
-| 0x70 | CLIPBOARD    | obie     | `u8 format` (0 = tekst UTF-8), dane (zwykle długa ramka, limit 1 MiB tekstu) |
+| 0x70 | CLIPBOARD    | obie     | `u8 format` (0 = tekst UTF-8, 1 = obraz PNG), dane (limit 1 MiB tekstu lub 32 MiB PNG, maks. 64 × 1024² pikseli) |
 
 Ustalenia:
 
@@ -50,8 +50,14 @@ Ustalenia:
   wysyła LEAVE i przestaje wstrzykiwać zdarzenia; Windows odblokowuje
   lokalne wejście i stawia kursor przy swojej krawędzi.
 * Schowek: każda strona obserwuje własny schowek (Mac: `changeCount`, Windows:
-  `GetClipboardSequenceNumber`) i po zmianie wysyła tekst CLIPBOARD. Odbiorca
+  `GetClipboardSequenceNumber`) i po zmianie wysyła tekst lub obraz CLIPBOARD. Odbiorca
   ustawia schowek i zapamiętuje własną zmianę, żeby nie odsyłać jej z powrotem.
+  Obraz ma pierwszeństwo przed tekstem/URL-em udostępnionym razem z nim.
+  macOS konwertuje TIFF do PNG przy wysyłaniu i udostępnia PNG oraz TIFF po odbiorze;
+  Windows udostępnia PNG i natywną bitmapę. Zachowujemy rozdzielczość i przezroczystość.
+  Puste, nieznane, niepoprawne i zbyt duże payloady są ignorowane.
+  Obsługa zdjęć wymaga aktualizacji obu aplikacji; starsze wersje obsługują tylko format 0
+  i mogą rozłączyć połączenie przy ramce większej niż ich limit 4 MiB.
 * Scancode ma pierwszeństwo przy mapowaniu klawiszy (mapowanie fizyczne,
   niezależne od układu klawiatury). `vk` jest zapasowe.
 

@@ -27,6 +27,8 @@ jobs:
       - name: Verify signature continuity and update validation
         if: github.event_name == 'push'
         run: bash macos/tests/signature-check.sh
+      - name: Verify clipboard protocol and PNG/TIFF synchronization
+        run: bash macos/tests/clipboard-check.sh
       - uses: actions/upload-artifact@v4
         with:
           name: BorderlessMouse-macOS-ci
@@ -50,6 +52,8 @@ jobs:
           dotnet-version: 8.0.x
       - name: Build
         run: dotnet build windows/BorderlessMouse/BorderlessMouse.csproj -c Release -warnaserror
+      - name: Verify clipboard protocol, images and concurrent changes
+        run: dotnet run --project windows/ClipboardChecks/BorderlessMouse.ClipboardChecks.csproj -c Release
       - name: Publish (win-x64, single file)
         run: >
           dotnet publish windows/BorderlessMouse/BorderlessMouse.csproj -c Release -r win-x64

@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
+    <InternalsVisibleTo Include="BorderlessMouse.ClipboardChecks" />
   </ItemGroup>
 
   <ItemGroup>

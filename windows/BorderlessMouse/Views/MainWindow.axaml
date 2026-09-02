@@ -188,8 +188,8 @@
                         <TextBlock Classes="icon" Text="&#xE77F;" />
                         <TextBlock Text="SCHOWEK" />
                     </StackPanel>
-                    <views:SettingRow Title="Synchronizuj schowek (tekst)"
-                                      Subtitle="Skopiowany tekst pojawia się w schowku drugiego komputera w ok. 0,5 s, w obie strony.">
+                    <views:SettingRow Title="Synchronizuj schowek (tekst i zdjęcia)"
+                                      Subtitle="Kopiuj i wklejaj tekst, zdjęcia oraz zrzuty ekranu w obie strony. Obrazy do 32 MiB.">
                         <ToggleSwitch Classes="compact" IsChecked="{Binding ClipboardSyncEnabled}" />
                     </views:SettingRow>
                     <Rectangle Classes="divider" />

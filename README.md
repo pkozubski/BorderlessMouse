@@ -13,8 +13,9 @@ Scenariusz, na który jest zbudowana ta wersja:
 * **Windows → Mac**: fizyczna klawiatura i mysz podpięte do Windowsa sterują Makiem
   (kursor przechodzi przez krawędź ekranu jak w Synergy/Barrier).
 * **Mac → Windows**: cały dźwięk systemowy Maca gra na słuchawkach/głośnikach Windowsa.
-* **Schowek w obie strony**: skopiowany tekst pojawia się w schowku drugiego komputera
-  w ok. 0,5 s (bez przełączania kursora).
+* **Schowek w obie strony**: kopiuj i wklejaj tekst, zdjęcia i zrzuty ekranu
+  między komputerami (bez przełączania kursora). Zmiany wykrywamy co ok. 0,5 s;
+  czas przesłania obrazu zależy od jego wielkości i sieci.
 * **Autostart**: obie aplikacje mogą uruchamiać się przy logowaniu i czekać w tle
   (pasek menu / zasobnik).
 
@@ -153,7 +154,11 @@ Aplikacja ma też ikonę w pasku menu z szybkimi przełącznikami.
    kursor przez przeciwną krawędź Maca albo naciśnij **Scroll Lock** (działa w obie strony).
 5. Dźwięk: włączony domyślnie; wybierz urządzenie wyjściowe i ewentualnie zmniejsz bufor.
 6. Schowek: włączony domyślnie po obu stronach (karta **Schowek**); synchronizowany jest
-   tekst do 1 MB. Obrazy i pliki nie są przesyłane.
+   tekst do 1 MiB oraz zdjęcia i zrzuty ekranu do 32 MiB w PNG (maks. 64 × 1024² pikseli).
+   Użyj „Kopiuj obraz” w przeglądarce/edytorze lub skopiuj zrzut ekranu do schowka,
+   a następnie wklej go w aplikacji obsługującej obrazy na drugim komputerze.
+   Obie aplikacje muszą być zaktualizowane. Kopiowanie plików w Finderze/Eksploratorze
+   i formatowanie tekstu nie są obsługiwane.
 
 Ustawienia są zapisywane w `%APPDATA%\BorderlessMouse\settings.json`; zamknięcie okna chowa
 aplikację do zasobnika (wyjście przez menu ikony).
@@ -259,7 +264,8 @@ windows/
 
 ## Znane ograniczenia / co dalej
 
-* Schowek synchronizuje tylko tekst (bez obrazów, plików i formatowania).
+* Schowek synchronizuje tekst i obrazy; nie przesyła plików ani formatowania tekstu.
+  Animowane obrazy są przesyłane jako pojedyncza klatka PNG.
 * Kierunek tylko Windows → Mac (wejście) i Mac → Windows (dźwięk); protokół jest gotowy na
   rozszerzenie o kierunek odwrotny.
 * Caps Lock jest przekazywany jako zwykły klawisz – macOS może go ignorować.

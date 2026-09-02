@@ -200,8 +200,8 @@ struct ClipboardCard: View {
 
     var body: some View {
         Card("Schowek", systemImage: "doc.on.clipboard") {
-            SettingRow(title: "Synchronizuj schowek (tekst)",
-                       subtitle: "Skopiowany tekst pojawia się w schowku drugiego komputera w ok. 0,5 s, w obie strony.") {
+            SettingRow(title: "Synchronizuj schowek (tekst i zdjęcia)",
+                       subtitle: "Kopiuj i wklejaj tekst, zdjęcia oraz zrzuty ekranu w obie strony. Obrazy do 32 MiB.") {
                 Toggle("", isOn: $state.settings.clipboardSyncEnabled).labelsHidden().toggleStyle(.switch)
             }
             Divider()

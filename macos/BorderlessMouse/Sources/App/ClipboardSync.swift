@@ -1,18 +1,22 @@
 import AppKit
 import Foundation
+import ImageIO
 
 /// Obserwuje NSPasteboard (po `changeCount`, co 0,5 s) i pozwala ustawić
 /// schowek z zewnątrz bez odsyłania własnej zmiany z powrotem.
 final class ClipboardSync {
     /// Wołane na wątku głównym.
-    var onLocalChange: ((String) -> Void)?
+    var onLocalChange: ((ClipboardContent) -> Void)?
+    var onApplied: ((ClipboardContent) -> Void)?
+    var onError: ((String) -> Void)?
 
-    private let pasteboard = NSPasteboard.general
+    private let pasteboard: NSPasteboard
     private var timer: DispatchSourceTimer?
     private var lastChangeCount: Int
-    private var lastText: String?
+    private var lastContent: ClipboardContent?
 
-    init() {
+    init(pasteboard: NSPasteboard = .general) {
+        self.pasteboard = pasteboard
         lastChangeCount = pasteboard.changeCount
     }
 
@@ -35,24 +39,80 @@ final class ClipboardSync {
         }
     }
 
-    /// Ustawia schowek tekstem z drugiego komputera.
-    func apply(_ text: String) {
+    /// Obraz udostępniamy jako PNG i TIFF, aby obsłużyć także aplikacje oczekujące TIFF.
+    func apply(_ content: ClipboardContent) {
         DispatchQueue.main.async {
+            let item = NSPasteboardItem()
+            switch content.format {
+            case .utf8Text:
+                guard let text = content.text else { return }
+                item.setString(text, forType: .string)
+            case .png:
+                guard let bitmap = NSBitmapImageRep(data: content.data),
+                      let tiff = bitmap.tiffRepresentation else {
+                    self.onError?("Nie udało się odczytać obrazu ze schowka Windowsa.")
+                    return
+                }
+                item.setData(content.data, forType: .png)
+                item.setData(tiff, forType: .tiff)
+            }
             self.pasteboard.clearContents()
-            self.pasteboard.setString(text, forType: .string)
+            guard self.pasteboard.writeObjects([item]) else {
+                self.onError?("Nie udało się zapisać schowka. Spróbuj skopiować ponownie.")
+                return
+            }
             self.lastChangeCount = self.pasteboard.changeCount
-            self.lastText = text
+            self.lastContent = content
+            self.onApplied?(content)
         }
     }
 
-    private func poll() {
+    func poll() {
         let count = pasteboard.changeCount
         guard count != lastChangeCount else { return }
+        // clearContents() zmienia licznik, ale późniejsze setData() w tej samej
+        // generacji już nie. Pusty schowek sprawdzamy ponownie przy następnym ticku.
+        guard let types = pasteboard.types, !types.isEmpty else {
+            lastContent = nil
+            return
+        }
+        let content = readContent()
+        // Schowek może się zmienić podczas odczytu danych dostarczanych na żądanie.
+        guard pasteboard.changeCount == count else { return }
         lastChangeCount = count
-        guard let text = pasteboard.string(forType: .string), !text.isEmpty,
-              text.utf8.count <= ProtocolConstants.maxClipboardBytes,
-              text != lastText else { return }
-        lastText = text
-        onLocalChange?(text)
+        let previous = lastContent
+        lastContent = content
+        guard let content, content != previous else { return }
+        onLocalChange?(content)
+    }
+
+    private func readContent() -> ClipboardContent? {
+        // Przeglądarki mogą kopiować obraz razem z URL-em; obraz ma pierwszeństwo.
+        if let png = pasteboard.data(forType: .png) {
+            guard let content = ClipboardContent(format: .png, data: png) else {
+                onError?("Nieobsługiwany obraz lub przekroczony limit 32 MiB / 64 megapikseli.")
+                return nil
+            }
+            return content
+        }
+        if let tiff = pasteboard.data(forType: .tiff) {
+            guard let source = CGImageSourceCreateWithData(tiff as CFData, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                  width > 0, height > 0,
+                  width <= ProtocolConstants.maxClipboardImagePixels,
+                  height <= ProtocolConstants.maxClipboardImagePixels,
+                  width * height <= ProtocolConstants.maxClipboardImagePixels,
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                  let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]),
+                  let content = ClipboardContent(format: .png, data: png) else {
+                onError?("Nieobsługiwany obraz lub przekroczony limit 32 MiB / 64 megapikseli.")
+                return nil
+            }
+            return content
+        }
+        guard let text = pasteboard.string(forType: .string) else { return nil }
+        return ClipboardContent(format: .utf8Text, data: Data(text.utf8))
     }
 }

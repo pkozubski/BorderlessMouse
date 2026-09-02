@@ -335,12 +335,13 @@ public partial class MainViewModel : ObservableObject
     {
         if (clipboard is null || _clipboardSync is not null) return;
         _clipboardSync = new ClipboardSync(clipboard) { Enabled = ClipboardSyncEnabled };
-        _clipboardSync.LocalChanged += text =>
+        _clipboardSync.LocalChanged += content =>
         {
             if (!IsConnected || !ClipboardSyncEnabled) return;
-            _client.SendClipboard(text);
-            ClipboardStatusText = $"Wysłano {text.Length} zn. do Maca · {DateTime.Now:HH:mm:ss}";
+            _client.SendClipboard(content);
+            ClipboardStatusText = $"Wysłano {content.Summary} do Maca · {DateTime.Now:HH:mm:ss}";
         };
+        _clipboardSync.Error += message => ClipboardStatusText = message;
         _clipboardSync.Start();
     }
 
@@ -466,10 +467,9 @@ public partial class MainViewModel : ObservableObject
                 if (Frame.ParseAudioFormat(payload) is { } fmt) OnAudioFormat(fmt);
                 break;
             case MessageType.Clipboard:
-                if (ClipboardSyncEnabled && _clipboardSync is not null && Frame.ParseClipboard(payload) is { Length: > 0 } text)
+                if (ClipboardSyncEnabled && _clipboardSync is not null && Frame.ParseClipboard(payload) is { } content)
                 {
-                    _ = _clipboardSync.ApplyAsync(text);
-                    ClipboardStatusText = $"Odebrano {text.Length} zn. z Maca · {DateTime.Now:HH:mm:ss}";
+                    _ = ApplyClipboardAsync(content);
                 }
                 break;
             case MessageType.Status:
@@ -781,6 +781,12 @@ public partial class MainViewModel : ObservableObject
         _settings.JitterBufferMs = (int)value;
         SaveSettings();
         _jitter?.SetTarget((int)value);
+    }
+
+    private async Task ApplyClipboardAsync(ClipboardContent content)
+    {
+        if (_clipboardSync is not null && await _clipboardSync.ApplyAsync(content))
+            ClipboardStatusText = $"Odebrano {content.Summary} z Maca · {DateTime.Now:HH:mm:ss}";
     }
 
     partial void OnClipboardSyncEnabledChanged(bool value)

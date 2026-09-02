@@ -27,8 +27,9 @@ final class Engine {
         case audioError(String)
         case audioLevel(Float)
         case audioStats(packets: UInt64, errors: UInt64)
-        case clipboardSent(characters: Int)
-        case clipboardReceived(characters: Int)
+        case clipboardSent(summary: String)
+        case clipboardReceived(summary: String)
+        case clipboardError(String)
         case log(String)
     }
 
@@ -178,13 +179,19 @@ final class Engine {
             self?.emit(.cursorOnMac(active))
             self?.sendStatus()
         }
-        clipboard.onLocalChange = { [weak self] text in
+        clipboard.onLocalChange = { [weak self] content in
             guard let self else { return }
             self.eventsQueue.async {
                 guard self.config.clipboardSync, self.peer != nil else { return }
-                self.server.send(Frame.clipboard(text: text))
-                self.emit(.clipboardSent(characters: text.count))
+                self.server.send(Frame.clipboard(content))
+                self.emit(.clipboardSent(summary: content.summary))
             }
+        }
+        clipboard.onApplied = { [weak self] content in
+            self?.eventsQueue.async { self?.emit(.clipboardReceived(summary: content.summary)) }
+        }
+        clipboard.onError = { [weak self] message in
+            self?.eventsQueue.async { self?.emit(.clipboardError(message)) }
         }
     }
 
@@ -253,13 +260,8 @@ final class Engine {
         case .audioStop:
             stopAudioLocked(notify: true)
         case .clipboard:
-            guard config.clipboardSync, let format = r.u8() else { return }
-            guard format == ClipboardFormat.utf8Text.rawValue else { return }
-            guard payload.count - 1 <= ProtocolConstants.maxClipboardBytes else { return }
-            let text = r.restAsString()
-            guard !text.isEmpty else { return }
-            clipboard.apply(text)
-            emit(.clipboardReceived(characters: text.count))
+            guard config.clipboardSync, let content = ClipboardContent(payload: payload) else { return }
+            clipboard.apply(content)
         default:
             break
         }

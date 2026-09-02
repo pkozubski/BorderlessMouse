@@ -228,10 +228,12 @@ final class AppState: ObservableObject {
         case let .audioStats(packets, errors):
             audioPackets = packets
             audioSendErrors = errors
-        case let .clipboardSent(n):
-            clipboardStatus = "Wysłano \(n) zn. do Windowsa · \(Self.timeFormatter.string(from: Date()))"
-        case let .clipboardReceived(n):
-            clipboardStatus = "Odebrano \(n) zn. z Windowsa · \(Self.timeFormatter.string(from: Date()))"
+        case let .clipboardSent(summary):
+            clipboardStatus = "Wysłano \(summary) do Windowsa · \(Self.timeFormatter.string(from: Date()))"
+        case let .clipboardReceived(summary):
+            clipboardStatus = "Odebrano \(summary) z Windowsa · \(Self.timeFormatter.string(from: Date()))"
+        case let .clipboardError(message):
+            clipboardStatus = message
         case let .log(text):
             appendLog(text)
         }

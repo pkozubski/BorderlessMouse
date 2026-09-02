@@ -14,9 +14,11 @@ public static class ProtocolConstants
     public const string DiscoveryReply = "BLM1!";
     public const ushort AudioMagic = 0x4D42;
     /// <summary>Maksymalny rozmiar długiej ramki.</summary>
-    public const int MaxLongFrame = 4 * 1024 * 1024;
+    public const int MaxLongFrame = MaxClipboardImageBytes + 1;
     /// <summary>Limit tekstu schowka (bajty UTF-8).</summary>
     public const int MaxClipboardBytes = 1024 * 1024;
+    public const int MaxClipboardImageBytes = 32 * 1024 * 1024;
+    public const long MaxClipboardImagePixels = 64 * 1024 * 1024;
 }
 
 public enum MessageType : byte
@@ -86,20 +88,19 @@ public static class Frame
         return big;
     }
 
-    public static byte[] Clipboard(string text)
+    public static byte[] Clipboard(ClipboardContent content)
     {
-        var bytes = Encoding.UTF8.GetBytes(text);
+        var bytes = content.Data;
         var payload = new byte[bytes.Length + 1];
-        payload[0] = 0; // UTF-8 text
-        bytes.CopyTo(payload, 1);
+        payload[0] = (byte)content.Format;
+        bytes.Span.CopyTo(payload.AsSpan(1));
         return Make(MessageType.Clipboard, payload);
     }
 
-    public static string? ParseClipboard(ReadOnlySpan<byte> p)
+    public static ClipboardContent? ParseClipboard(ReadOnlySpan<byte> p)
     {
-        if (p.Length < 2 || p[0] != 0) return null;
-        if (p.Length - 1 > ProtocolConstants.MaxClipboardBytes) return null;
-        return Encoding.UTF8.GetString(p[1..]);
+        if (p.Length < 2) return null;
+        return ClipboardContent.Create((ClipboardFormat)p[0], p[1..]);
     }
 
     public static byte[] Hello(string name)

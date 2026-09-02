@@ -98,7 +98,7 @@ public sealed class ControlClient : IDisposable
     public void SendReleaseAll() => Send(Frame.ReleaseAll());
     public void SendAudioStart(ushort udpPort) => Send(Frame.AudioStart(udpPort));
     public void SendAudioStop() => Send(Frame.AudioStop());
-    public void SendClipboard(string text) => Send(Frame.Clipboard(text));
+    public void SendClipboard(ClipboardContent content) => Send(Frame.Clipboard(content));
 
     private async Task WriterLoop(NetworkStream stream, ChannelReader<byte[]> reader, CancellationToken ct)
     {
