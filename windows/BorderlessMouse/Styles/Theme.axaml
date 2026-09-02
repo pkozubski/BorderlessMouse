@@ -1,44 +1,146 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:BorderlessMouse.Views">
 
+    <!-- Wspólny język wizualny z wersją macOS: karty, wiersze ustawień, pastylka stanu.
+         Kontrolki (przełączniki, listy, suwaki) pochodzą z FluentAvalonia (WinUI 3). -->
     <Styles.Resources>
         <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="CardBackground" Color="#F2FFFFFF" />
+                    <SolidColorBrush x:Key="CardBorder" Color="#E3E3E8" />
+                    <SolidColorBrush x:Key="MutedText" Color="#6E6E73" />
+                    <SolidColorBrush x:Key="RowDivider" Color="#ECECF0" />
+                    <SolidColorBrush x:Key="PillBackground" Color="#E9EDF5" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="CardBackground" Color="#CC2A2A2D" />
+                    <SolidColorBrush x:Key="CardBorder" Color="#3A3A3E" />
+                    <SolidColorBrush x:Key="MutedText" Color="#A1A1A6" />
+                    <SolidColorBrush x:Key="RowDivider" Color="#38383C" />
+                    <SolidColorBrush x:Key="PillBackground" Color="#38383E" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <LinearGradientBrush x:Key="AccentGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+                <GradientStop Color="#3B82F6" Offset="0" />
+                <GradientStop Color="#8B5CF6" Offset="1" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="LevelGradient" StartPoint="0%,0%" EndPoint="100%,0%">
+                <GradientStop Color="#34C759" Offset="0" />
+                <GradientStop Color="#FFD60A" Offset="0.6" />
+                <GradientStop Color="#FF453A" Offset="1" />
+            </LinearGradientBrush>
             <SolidColorBrush x:Key="StatusGreen" Color="#34C759" />
             <SolidColorBrush x:Key="StatusOrange" Color="#FF9F0A" />
             <SolidColorBrush x:Key="StatusRed" Color="#FF453A" />
             <SolidColorBrush x:Key="StatusGray" Color="#8E8E93" />
             <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+            <!-- Wiersz ustawienia: tytuł + opis po lewej, kontrolka po prawej -->
+            <ControlTheme x:Key="{x:Type views:SettingRow}" TargetType="views:SettingRow">
+                <Setter Property="HorizontalContentAlignment" Value="Right" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Grid ColumnDefinitions="*,Auto" MinHeight="34">
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2" Margin="0,0,12,0">
+                                <TextBlock Classes="rowTitle" Text="{TemplateBinding Title}" />
+                                <TextBlock Classes="subtitle"
+                                           Text="{TemplateBinding Subtitle}"
+                                           IsVisible="{TemplateBinding Subtitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            </StackPanel>
+                            <ContentPresenter Grid.Column="1"
+                                              Content="{TemplateBinding Content}"
+                                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Right" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
         </ResourceDictionary>
     </Styles.Resources>
 
-    <!-- Nagłówek sekcji jak w Ustawieniach Windows 11 -->
-    <Style Selector="TextBlock.section">
-        <Setter Property="Theme" Value="{StaticResource BodyStrongTextBlockStyle}" />
-        <Setter Property="Margin" Value="0,18,0,6" />
+    <Style Selector="Border.card">
+        <Setter Property="Background" Value="{DynamicResource CardBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="Padding" Value="16" />
     </Style>
 
-    <Style Selector="TextBlock.secondary">
-        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    <Style Selector="Border.pill">
+        <Setter Property="Background" Value="{DynamicResource PillBackground}" />
+        <Setter Property="CornerRadius" Value="999" />
+        <Setter Property="Padding" Value="10,5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="StackPanel.sectionHeader">
+        <Setter Property="Orientation" Value="Horizontal" />
+        <Setter Property="Spacing" Value="8" />
+    </Style>
+    <Style Selector="StackPanel.sectionHeader > TextBlock">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="LetterSpacing" Value="0.8" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="StackPanel.sectionHeader > TextBlock.icon">
+        <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="LetterSpacing" Value="0" />
+    </Style>
+
+    <Style Selector="TextBlock.subtitle">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedText}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style Selector="TextBlock.rowTitle">
+        <Setter Property="FontSize" Value="13.5" />
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
     <Style Selector="TextBlock.mono">
         <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Menlo, monospace" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
-    <Style Selector="Border.pill">
-        <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="999" />
-        <Setter Property="Padding" Value="12,6" />
-        <Setter Property="VerticalAlignment" Value="Center" />
+    <Style Selector="Rectangle.divider">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Fill" Value="{DynamicResource RowDivider}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
     </Style>
 
-    <Style Selector="ToggleSwitch.pl">
-        <Setter Property="OnContent" Value="Wł." />
-        <Setter Property="OffContent" Value="Wył." />
+    <Style Selector="ToggleSwitch.compact">
+        <Setter Property="OnContent" Value="" />
+        <Setter Property="OffContent" Value="" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Margin" Value="0,-4,-8,-4" />
+    </Style>
+
+    <Style Selector="Button.accent">
+        <Setter Property="Background" Value="{DynamicResource AccentGradient}" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="16,7" />
+        <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="#2563EB" />
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <!-- miernik poziomu jak na Macu: gradient zielony → czerwony -->
+    <Style Selector="ProgressBar.level">
+        <Setter Property="Foreground" Value="{StaticResource LevelGradient}" />
+        <Setter Property="Height" Value="8" />
+        <Setter Property="CornerRadius" Value="4" />
     </Style>
 </Styles>

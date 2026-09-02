@@ -164,6 +164,40 @@ public partial class MainViewModel : ObservableObject
     // Cykl życia
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Tryb offline (zrzuty ekranu / podgląd UI): bez wykrywania, łączenia,
+    /// audio i sprawdzania aktualizacji; interfejs wypełniony przykładowymi danymi.
+    /// </summary>
+    public void StartOffline()
+    {
+        _loading = true;
+        AutoConnect = false;
+        _loading = false;
+        Log("Tryb podglądu – sieć wyłączona");
+        IsConnected = true;
+        PeerName = "MacBook Air (Paweł)";
+        DiscoveredPeers.Add(new DiscoveredPeer("MacBook Air (Paweł)", "192.168.1.42", 47800));
+        HasDiscoveredPeers = true;
+        HostAddress = "192.168.1.42";
+        MacStatusText = "Mac: uprawnienie Dostępność OK · przechwytuje dźwięk";
+        CursorOnMac = true;
+        AudioActive = true;
+        AudioStatusText = "48000 Hz · stereo · Słuchawki (USB) · WASAPI shared · 15 ms";
+        AudioStatusBrush = Green;
+        AudioLevel = 0.42f;
+        AudioStatsText = "bufor 21 ms · pakiety 18432 · utracone 0 · underruns 0 · przycięcia 0";
+        ClipboardStatusText = "Odebrano 128 zn. z Maca · 21:40:12";
+        UpdateStatusText = $"Masz najnowszą wersję · sprawdzono {DateTime.Now:HH:mm}";
+        ConnectionInfo = "Połączono z MacBook Air (Paweł) · 192.168.1.42:47800 · ping 0,4 ms";
+        StatusText = "Sterujesz Makiem";
+        StatusBrush = Green;
+        CursorStatusText = "Na Macu · wysłane ruchy: 1 284";
+        CursorStatusBrush = Green;
+        Log("Połączono z MacBook Air (Paweł) (192.168.1.42)");
+        Log("Hooki aktywne, ruch myszy z Raw Input (kursor zostaje przy krawędzi)");
+        Log("Audio gra: 48000 Hz · stereo · WASAPI shared · 15 ms");
+    }
+
     public void Start()
     {
         Log("Start aplikacji");

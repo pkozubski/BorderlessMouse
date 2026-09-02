@@ -3,34 +3,34 @@
                xmlns:wnd="using:FluentAvalonia.UI.Windowing"
                xmlns:ui="using:FluentAvalonia.UI.Controls"
                xmlns:vm="using:BorderlessMouse.ViewModels"
+               xmlns:views="using:BorderlessMouse.Views"
                xmlns:net="using:BorderlessMouse.Net"
                x:Class="BorderlessMouse.Views.MainWindow"
                x:DataType="vm:MainViewModel"
                Title="BorderlessMouse"
                Icon="avares://BorderlessMouse/Assets/icon.png"
-               Width="760" Height="920"
-               MinWidth="580" MinHeight="600"
+               Width="620" Height="940"
+               MinWidth="560" MinHeight="600"
                WindowStartupLocation="CenterScreen">
 
     <ScrollViewer>
-        <StackPanel MaxWidth="860" Margin="32,44,32,32" Spacing="4" HorizontalAlignment="Stretch">
+        <StackPanel Spacing="14" Margin="20,40,20,20">
 
             <!-- Nagłówek -->
-            <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,8">
-                <Image Source="avares://BorderlessMouse/Assets/logo.png" Width="60" Height="60" />
-                <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center" Spacing="2">
-                    <TextBlock Text="BorderlessMouse" Theme="{StaticResource TitleTextBlockStyle}" />
-                    <TextBlock Classes="secondary" Text="Windows: wysyła klawiaturę i mysz, odbiera dźwięk i schowek z Maca" />
+            <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,4">
+                <Image Source="avares://BorderlessMouse/Assets/logo.png" Width="56" Height="56" />
+                <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Text="BorderlessMouse" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Classes="subtitle" Text="Windows: wysyła klawiaturę i mysz, odbiera dźwięk i schowek z Maca" />
                 </StackPanel>
                 <Border Grid.Column="2" Classes="pill">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
                         <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding StatusText}" FontWeight="Medium" FontSize="13" VerticalAlignment="Center" />
                     </StackPanel>
                 </Border>
             </Grid>
 
-            <!-- Aktualizacja -->
             <ui:InfoBar IsOpen="{Binding UpdateAvailable}"
                         Severity="Informational"
                         Title="Dostępna aktualizacja"
@@ -43,209 +43,233 @@
             <ui:InfoBar IsOpen="{Binding MacAccessibilityMissing}"
                         Severity="Warning"
                         Title="Mac nie ma uprawnienia Dostępność"
-                        Message="Sterowanie klawiaturą i myszą nie zadziała, dopóki na Macu nie nadasz BorderlessMouse uprawnienia w Ustawieniach systemowych (Prywatność i ochrona, sekcja Dostępność)."
+                        Message="Sterowanie nie zadziała, dopóki na Macu nie nadasz BorderlessMouse uprawnienia w Ustawieniach systemowych (Prywatność i ochrona, sekcja Dostępność)."
                         IsClosable="False" />
 
             <!-- Połączenie -->
-            <TextBlock Classes="section" Text="Połączenie z Makiem" />
-            <ui:SettingsExpander Header="Mac w sieci lokalnej"
-                                 Description="{Binding ConnectionInfo}"
-                                 IsExpanded="True">
-                <ui:SettingsExpander.IconSource>
-                    <ui:FontIconSource Glyph="&#xE839;" FontFamily="{StaticResource IconFont}" />
-                </ui:SettingsExpander.IconSource>
-                <ui:SettingsExpander.Footer>
-                    <Button Classes="accent" MinWidth="120"
-                            Content="{Binding ConnectButtonText}"
-                            Command="{Binding ToggleConnectCommand}" />
-                </ui:SettingsExpander.Footer>
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE839;" />
+                        <TextBlock Text="POŁĄCZENIE Z MAKIEM" />
+                    </StackPanel>
 
-                <ui:SettingsExpanderItem Content="Znalezione Maki" Description="Kliknij, aby wybrać. Na Macu musi działać BorderlessMouse.">
-                    <ui:SettingsExpanderItem.Footer>
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="rowTitle" Text="Znalezione Maki w sieci lokalnej" />
+                        <TextBlock Classes="subtitle" Text="Na Macu musi działać BorderlessMouse. Kliknij, aby wybrać adres." />
                         <ListBox ItemsSource="{Binding DiscoveredPeers}"
                                  SelectedItem="{Binding SelectedPeer}"
-                                 MinWidth="300" MaxHeight="120">
+                                 MaxHeight="110" CornerRadius="8">
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="net:DiscoveredPeer">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding Address}" Classes="secondary" />
+                                        <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                                        <TextBlock Text="{Binding Address}" Foreground="{DynamicResource MutedText}" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Adres IP Maca" Description="Wpisz ręcznie, jeśli Mac nie pojawia się na liście.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <TextBox Text="{Binding HostAddress}" Watermark="np. 192.168.1.20" MinWidth="220"
+                        <TextBlock Classes="subtitle" Text="Nie znaleziono jeszcze żadnego Maca – wpisz adres ręcznie poniżej."
+                                   IsVisible="{Binding !HasDiscoveredPeers}" />
+                    </StackPanel>
+
+                    <Rectangle Classes="divider" />
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <TextBox Grid.Column="0" Text="{Binding HostAddress}" Watermark="Adres IP Maca, np. 192.168.1.20"
                                  IsEnabled="{Binding !IsConnected}" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Łącz automatycznie" Description="Przy starcie i po utracie połączenia.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <ToggleSwitch Classes="pl" IsChecked="{Binding AutoConnect}" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Stan Maca" Description="{Binding MacStatusText}" />
-            </ui:SettingsExpander>
+                        <Button Grid.Column="1" Classes="accent" MinWidth="110"
+                                Content="{Binding ConnectButtonText}"
+                                Command="{Binding ToggleConnectCommand}" />
+                    </Grid>
+
+                    <views:SettingRow Title="Łącz automatycznie" Subtitle="Przy starcie i po utracie połączenia próbuj ponownie.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding AutoConnect}" />
+                    </views:SettingRow>
+
+                    <Rectangle Classes="divider" />
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding ConnectionInfo}" FontSize="13" />
+                        <TextBlock Classes="subtitle" Text="{Binding MacStatusText}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
 
             <!-- Klawiatura i mysz -->
-            <TextBlock Classes="section" Text="Klawiatura i mysz do Maca" />
-            <ui:SettingsExpander Header="Udostępniaj klawiaturę i mysz"
-                                 Description="Po dojechaniu kursorem do krawędzi ekranu sterujesz Makiem. Scroll Lock przełącza ręcznie."
-                                 IsExpanded="True">
-                <ui:SettingsExpander.IconSource>
-                    <ui:FontIconSource Glyph="&#xE765;" FontFamily="{StaticResource IconFont}" />
-                </ui:SettingsExpander.IconSource>
-                <ui:SettingsExpander.Footer>
-                    <ToggleSwitch Classes="pl" IsChecked="{Binding InputSharingEnabled}" />
-                </ui:SettingsExpander.Footer>
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE765;" />
+                        <TextBlock Text="KLAWIATURA I MYSZ DO MACA" />
+                    </StackPanel>
 
-                <ui:SettingsExpanderItem Content="Mac stoi względem tego ekranu" Description="Krawędź, przez którą kursor przechodzi na Maca.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <ComboBox ItemsSource="{Binding MacSides}" SelectedItem="{Binding SelectedMacSide}" MinWidth="160" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Czułość myszy na Macu" Description="{Binding RemoteMouseSpeedLabel}">
-                    <ui:SettingsExpanderItem.Footer>
+                    <views:SettingRow Title="Udostępniaj klawiaturę i mysz"
+                                      Subtitle="Po dojechaniu kursorem do krawędzi ekranu sterujesz Makiem.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding InputSharingEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+
+                    <views:SettingRow Title="Mac stoi względem tego ekranu"
+                                      Subtitle="Krawędź, przez którą kursor przechodzi na Maca.">
+                        <ComboBox ItemsSource="{Binding MacSides}" SelectedItem="{Binding SelectedMacSide}" MinWidth="150" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+
+                    <views:SettingRow Title="Czułość myszy na Macu" Subtitle="{Binding RemoteMouseSpeedLabel}">
                         <Slider Minimum="0.25" Maximum="4" TickFrequency="0.25" IsSnapToTickEnabled="True"
-                                Value="{Binding RemoteMouseSpeed}" Width="220" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Ukrywaj kursor podczas sterowania Makiem" Description="Kursor zostaje przy krawędzi, przez którą wyszedł, i znika pod niewidocznym oknem.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <ToggleSwitch Classes="pl" IsChecked="{Binding HideCursorWhileRemote}" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Kursor">
-                    <ui:SettingsExpanderItem.Footer>
-                        <TextBlock Text="{Binding CursorStatusText}" FontWeight="SemiBold" Foreground="{Binding CursorStatusBrush}" VerticalAlignment="Center" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-            </ui:SettingsExpander>
+                                Value="{Binding RemoteMouseSpeed}" Width="190" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+
+                    <views:SettingRow Title="Ukrywaj kursor podczas sterowania Makiem"
+                                      Subtitle="Kursor zostaje przy krawędzi, przez którą wyszedł, i znika pod niewidocznym oknem.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding HideCursorWhileRemote}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+
+                    <views:SettingRow Title="Kursor" Subtitle="Scroll Lock przełącza sterowanie ręcznie w obie strony.">
+                        <TextBlock Text="{Binding CursorStatusText}" FontWeight="Medium" Foreground="{Binding CursorStatusBrush}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
 
             <!-- Dźwięk -->
-            <TextBlock Classes="section" Text="Dźwięk z Maca na tym komputerze" />
-            <ui:SettingsExpander Header="Odbieraj dźwięk z Maca"
-                                 Description="{Binding AudioStatusText}"
-                                 IsExpanded="True">
-                <ui:SettingsExpander.IconSource>
-                    <ui:FontIconSource Glyph="&#xE767;" FontFamily="{StaticResource IconFont}" />
-                </ui:SettingsExpander.IconSource>
-                <ui:SettingsExpander.Footer>
-                    <ToggleSwitch Classes="pl" IsChecked="{Binding AudioEnabled}" />
-                </ui:SettingsExpander.Footer>
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE767;" />
+                        <TextBlock Text="DŹWIĘK Z MACA" />
+                    </StackPanel>
 
-                <ui:SettingsExpanderItem Content="Urządzenie wyjściowe" Description="Słuchawki lub głośniki podłączone do Windowsa.">
-                    <ui:SettingsExpanderItem.Footer>
+                    <views:SettingRow Title="Odbieraj dźwięk z Maca"
+                                      Subtitle="Cały dźwięk systemowy Maca gra na wybranym urządzeniu (UDP, PCM 16-bit).">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding AudioEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+
+                    <views:SettingRow Title="Urządzenie wyjściowe" Subtitle="Słuchawki lub głośniki podłączone do Windowsa.">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" MinWidth="240" MaxWidth="300" />
+                            <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" MinWidth="220" MaxWidth="260" />
                             <Button Command="{Binding RefreshAudioDevicesCommand}" ToolTip.Tip="Odśwież listę urządzeń">
                                 <ui:FontIcon Glyph="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="14" />
                             </Button>
                         </StackPanel>
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Bufor sieciowy" Description="{Binding JitterBufferLabel}">
-                    <ui:SettingsExpanderItem.Footer>
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+
+                    <views:SettingRow Title="Bufor sieciowy" Subtitle="{Binding JitterBufferLabel}">
                         <Slider Minimum="5" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
-                                Value="{Binding JitterBufferMs}" Width="220" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Tryb WASAPI exclusive" Description="Najniższe opóźnienie, ale blokuje kartę dla innych aplikacji. Przy braku wsparcia wraca do shared.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <ToggleSwitch Classes="pl" IsChecked="{Binding ExclusiveMode}" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Poziom i statystyki" Description="{Binding AudioStatsText}">
-                    <ui:SettingsExpanderItem.Footer>
-                        <ProgressBar Minimum="0" Maximum="1" Value="{Binding AudioLevel}" Width="220" Height="6" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-            </ui:SettingsExpander>
+                                Value="{Binding JitterBufferMs}" Width="190" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+
+                    <views:SettingRow Title="Tryb WASAPI exclusive"
+                                      Subtitle="Najniższe opóźnienie, ale blokuje kartę dla innych aplikacji. Przy braku wsparcia wraca do shared.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding ExclusiveMode}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Ellipse Width="8" Height="8" Fill="{Binding AudioStatusBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding AudioStatusText}" FontSize="13" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ProgressBar Classes="level" Minimum="0" Maximum="1" Value="{Binding AudioLevel}" />
+                        <TextBlock Classes="subtitle" Text="{Binding AudioStatsText}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
 
             <!-- Schowek -->
-            <TextBlock Classes="section" Text="Schowek" />
-            <ui:SettingsExpander Header="Synchronizuj schowek (tekst)"
-                                 Description="{Binding ClipboardStatusText}">
-                <ui:SettingsExpander.IconSource>
-                    <ui:FontIconSource Glyph="&#xE77F;" FontFamily="{StaticResource IconFont}" />
-                </ui:SettingsExpander.IconSource>
-                <ui:SettingsExpander.Footer>
-                    <ToggleSwitch Classes="pl" IsChecked="{Binding ClipboardSyncEnabled}" />
-                </ui:SettingsExpander.Footer>
-                <ui:SettingsExpanderItem Content="Jak to działa" Description="Skopiowany tekst pojawia się w schowku drugiego komputera w ok. 0,5 s, w obie strony. Obrazy i pliki nie są przesyłane." />
-            </ui:SettingsExpander>
-
-            <!-- Ustawienia -->
-            <TextBlock Classes="section" Text="Ustawienia" />
-            <ui:SettingsExpander Header="Sieć i nazwa" Description="Porty muszą zgadzać się z ustawieniami na Macu.">
-                <ui:SettingsExpander.IconSource>
-                    <ui:FontIconSource Glyph="&#xE713;" FontFamily="{StaticResource IconFont}" />
-                </ui:SettingsExpander.IconSource>
-                <ui:SettingsExpanderItem Content="Nazwa tego komputera" Description="Widoczna w aplikacji na Macu.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <TextBox Text="{Binding DeviceName}" MinWidth="220" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Port TCP Maca" Description="Domyślnie 47800.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <TextBox Text="{Binding ControlPortText}" MinWidth="100" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-                <ui:SettingsExpanderItem Content="Port UDP audio (ten komputer)" Description="Domyślnie 47802. Zapora Windows musi go przepuszczać.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <TextBox Text="{Binding AudioPortText}" MinWidth="100" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-            </ui:SettingsExpander>
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE77F;" />
+                        <TextBlock Text="SCHOWEK" />
+                    </StackPanel>
+                    <views:SettingRow Title="Synchronizuj schowek (tekst)"
+                                      Subtitle="Skopiowany tekst pojawia się w schowku drugiego komputera w ok. 0,5 s, w obie strony.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding ClipboardSyncEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Ostatnia synchronizacja" Subtitle="{Binding ClipboardStatusText}">
+                        <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
 
             <!-- Uruchamianie -->
-            <ui:SettingsExpander Header="Uruchamianie" Description="{Binding AutostartStatus}">
-                <ui:SettingsExpander.IconSource>
-                    <ui:FontIconSource Glyph="&#xE7E8;" FontFamily="{StaticResource IconFont}" />
-                </ui:SettingsExpander.IconSource>
-                <ui:SettingsExpander.Footer>
-                    <ToggleSwitch Classes="pl" IsChecked="{Binding LaunchAtLogin}" />
-                </ui:SettingsExpander.Footer>
-                <ui:SettingsExpanderItem Content="Startuj zminimalizowany do zasobnika" Description="Przy autostarcie okno pozostaje ukryte; kliknij ikonę w zasobniku, aby je otworzyć.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <ToggleSwitch Classes="pl" IsChecked="{Binding StartMinimized}" IsEnabled="{Binding LaunchAtLogin}" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-            </ui:SettingsExpander>
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE7E8;" />
+                        <TextBlock Text="URUCHAMIANIE" />
+                    </StackPanel>
+                    <views:SettingRow Title="Uruchamiaj przy logowaniu" Subtitle="{Binding AutostartStatus}">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding LaunchAtLogin}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Startuj zminimalizowany do zasobnika"
+                                      Subtitle="Przy autostarcie okno pozostaje ukryte; kliknij ikonę w zasobniku, aby je otworzyć.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding StartMinimized}" IsEnabled="{Binding LaunchAtLogin}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <!-- Ustawienia -->
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE713;" />
+                        <TextBlock Text="USTAWIENIA" />
+                    </StackPanel>
+                    <views:SettingRow Title="Nazwa tego komputera" Subtitle="Widoczna w aplikacji na Macu.">
+                        <TextBox Text="{Binding DeviceName}" Width="200" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Port TCP Maca" Subtitle="Domyślnie 47800 – musi zgadzać się z ustawieniem na Macu.">
+                        <TextBox Text="{Binding ControlPortText}" Width="90" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Port UDP audio (ten komputer)" Subtitle="Domyślnie 47802. Zapora Windows musi go przepuszczać.">
+                        <TextBox Text="{Binding AudioPortText}" Width="90" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
 
             <!-- Aktualizacje -->
-            <ui:SettingsExpander Header="{Binding VersionLabel}" Description="{Binding UpdateStatusText}">
-                <ui:SettingsExpander.IconSource>
-                    <ui:FontIconSource Glyph="&#xE896;" FontFamily="{StaticResource IconFont}" />
-                </ui:SettingsExpander.IconSource>
-                <ui:SettingsExpander.Footer>
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ProgressBar IsIndeterminate="True" Width="120" Height="4" IsVisible="{Binding IsCheckingUpdates}" />
-                        <ProgressBar Minimum="0" Maximum="1" Value="{Binding UpdateProgress}" Width="120" Height="4" IsVisible="{Binding IsInstallingUpdate}" />
-                        <Button Content="Sprawdź teraz" Command="{Binding CheckUpdatesCommand}" IsVisible="{Binding !UpdateAvailable}" />
-                        <Button Classes="accent" Content="Zainstaluj" Command="{Binding InstallUpdateCommand}" IsVisible="{Binding UpdateAvailable}" />
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE896;" />
+                        <TextBlock Text="AKTUALIZACJE" />
                     </StackPanel>
-                </ui:SettingsExpander.Footer>
-                <ui:SettingsExpanderItem Content="Sprawdzaj automatycznie" Description="Po starcie i co 6 godzin, przez GitHub Releases.">
-                    <ui:SettingsExpanderItem.Footer>
-                        <ToggleSwitch Classes="pl" IsChecked="{Binding AutoCheckUpdates}" />
-                    </ui:SettingsExpanderItem.Footer>
-                </ui:SettingsExpanderItem>
-            </ui:SettingsExpander>
+                    <views:SettingRow Title="{Binding VersionLabel}" Subtitle="{Binding UpdateStatusText}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ProgressBar IsIndeterminate="True" Width="120" Height="4" IsVisible="{Binding IsCheckingUpdates}" />
+                            <ProgressBar Minimum="0" Maximum="1" Value="{Binding UpdateProgress}" Width="120" Height="4" IsVisible="{Binding IsInstallingUpdate}" />
+                            <Button Content="Sprawdź teraz" Command="{Binding CheckUpdatesCommand}" IsVisible="{Binding !UpdateAvailable}" />
+                            <Button Classes="accent" Content="Zainstaluj" Command="{Binding InstallUpdateCommand}" IsVisible="{Binding UpdateAvailable}" />
+                        </StackPanel>
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Sprawdzaj automatycznie" Subtitle="Po starcie i co 6 godzin, przez GitHub Releases.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding AutoCheckUpdates}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
 
             <!-- Dziennik -->
-            <TextBlock Classes="section" Text="Dziennik" />
-            <ui:SettingsExpander Header="Zdarzenia" Description="Ostatnie 60 wpisów.">
-                <ui:SettingsExpander.IconSource>
-                    <ui:FontIconSource Glyph="&#xE7C3;" FontFamily="{StaticResource IconFont}" />
-                </ui:SettingsExpander.IconSource>
-                <ui:SettingsExpander.Footer>
-                    <Button Content="Wyczyść" Command="{Binding ClearLogCommand}" />
-                </ui:SettingsExpander.Footer>
-                <ui:SettingsExpanderItem>
+            <Border Classes="card">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Classes="sectionHeader" VerticalAlignment="Center">
+                            <TextBlock Classes="icon" Text="&#xE7C3;" />
+                            <TextBlock Text="DZIENNIK" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="Wyczyść" Command="{Binding ClearLogCommand}" FontSize="12" Padding="10,4" />
+                    </Grid>
                     <ItemsControl ItemsSource="{Binding LogLines}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="x:String">
@@ -253,8 +277,8 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </ui:SettingsExpanderItem>
-            </ui:SettingsExpander>
+                </StackPanel>
+            </Border>
 
         </StackPanel>
     </ScrollViewer>

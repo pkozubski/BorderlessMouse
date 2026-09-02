@@ -2,27 +2,22 @@ import AppKit
 import SwiftUI
 
 /// Renderowanie interfejsu do pliku PNG bez uruchamiania serwera, audio ani
-/// uprawnień – diagnostyka wyglądu (`--ui-preview <plik.png> [panel]`).
+/// uprawnień – diagnostyka wyglądu (`--ui-preview <plik.png>`).
 /// Odpowiednik `--screenshot` w wersji Windows.
 @MainActor
 enum UIPreview {
     static func run() -> Never {
         let args = CommandLine.arguments
         guard let idx = args.firstIndex(of: "--ui-preview"), idx + 1 < args.count else {
-            FileHandle.standardError.write(Data("użycie: --ui-preview <plik.png> [panel]\n".utf8))
+            FileHandle.standardError.write(Data("użycie: --ui-preview <plik.png>\n".utf8))
             exit(2)
         }
         let path = args[idx + 1]
-        let paneName = idx + 2 < args.count ? args[idx + 2] : nil
         let state = AppState.demo()
-        var view = ContentView()
-        if let paneName, let pane = ContentView.Pane(rawValue: paneName) {
-            view = ContentView(initialPane: pane)
-        }
-        let root = view.environmentObject(state)
-        let size = CGSize(width: 1000, height: 700)
-        // NSHostingView renderuje treść paneli wiernie; materiał paska bocznego
-        // wymaga prawdziwego okna na ekranie, więc w podglądzie wychodzi jasny.
+        let root = ContentView().environmentObject(state)
+        let size = CGSize(width: 560, height: 1180)
+        // NSHostingView renderuje karty wiernie; materiały systemowe wymagałyby
+        // prawdziwego okna na ekranie.
         let hosting = NSHostingView(rootView: root.frame(width: size.width, height: size.height))
         hosting.frame = CGRect(origin: .zero, size: size)
         hosting.layoutSubtreeIfNeeded()

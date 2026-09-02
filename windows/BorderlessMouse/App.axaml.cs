@@ -33,10 +33,19 @@ public partial class App : Application
             desktop.ShutdownRequested += (_, _) => _viewModel.Shutdown();
             var background = desktop.Args?.Contains(Models.Autostart.BackgroundArgument) == true
                              && _viewModel.StartMinimized;
+            var screenshot = desktop.Args?.Contains("--screenshot") == true;
             if (!background) _mainWindow.Show();
-            _viewModel.AttachClipboard(_mainWindow.Clipboard);
-            _viewModel.Start();
-            if (background) _viewModel.LogBackgroundStart();
+            if (screenshot)
+            {
+                // zrzut interfejsu: żadnej sieci, żeby nie dotykać działających instancji
+                _viewModel.StartOffline();
+            }
+            else
+            {
+                _viewModel.AttachClipboard(_mainWindow.Clipboard);
+                _viewModel.Start();
+                if (background) _viewModel.LogBackgroundStart();
+            }
             HandleScreenshotFlag(desktop.Args);
         }
 

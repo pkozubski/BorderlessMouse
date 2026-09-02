@@ -75,20 +75,17 @@ autostart, wypisuje użyty mechanizm i przywraca poprzedni stan.
 
 ## Interfejs
 
-Aplikacja na Macu jest w całości w SwiftUI i korzysta ze standardowych komponentów:
-`NavigationSplitView` z paskiem bocznym oraz `Form` w stylu `.grouped` z sekcjami,
-`LabeledContent` i dwuwierszowymi `Toggle`. Efekt jest taki, że okno wygląda jak Ustawienia
-systemowe i automatycznie przejmuje wygląd systemu, w tym jasny i ciemny motyw oraz nowy
-wygląd macOS 26.
-
-Wersja Windows używa FluentAvalonia, czyli komponentów WinUI 3 (`AppWindow`,
-`SettingsExpander`, `InfoBar`, Mica), więc analogicznie wygląda jak Ustawienia Windows 11.
-Obie aplikacje mają ten sam układ treści i to samo logo, ale każda trzyma się wyglądu
-swojego systemu.
+Obie aplikacje mają ten sam układ: nagłówek z logo i pastylką stanu, a pod nim karty
+(połączenie, klawiatura i mysz, dźwięk, schowek, uruchamianie, ustawienia, aktualizacje,
+dziennik) z wierszami „tytuł + opis + kontrolka”. Na Macu to SwiftUI, na Windowsie Avalonia
+z motywem FluentAvalonia (kontrolki WinUI 3, Mica, systemowy kolor akcentu), więc karty są
+wspólne, a przełączniki, listy i suwaki pochodzą z danego systemu.
 
 Podgląd wyglądu bez uruchamiania sieci i uprawnień:
-`BorderlessMouse --ui-preview zrzut.png [panel]`, gdzie panel to `connection`, `input`,
-`audio`, `clipboard`, `startup`, `updates` lub `log`.
+
+* macOS: `BorderlessMouse.app/Contents/MacOS/BorderlessMouse --ui-preview zrzut.png`
+* Windows: `BorderlessMouse.exe --screenshot zrzut.png` (zapisuje też `zrzut-bottom.png`
+  z dołem okna). W tym trybie aplikacja nie łączy się z niczym i pokazuje przykładowe dane.
 
 ## Auto-updater
 
@@ -189,11 +186,6 @@ Rozwiązania:
 
 ### Windows
 
-Interfejs używa FluentAvalonia (WinUI 3 look: `AppWindow`, `SettingsExpander`, `InfoBar`, Mica na
-Windows 11, motyw i kolor akcentu z systemu). Tryb diagnostyczny `BorderlessMouse.exe --screenshot
-plik.png` renderuje okno do PNG (druga klatka `plik-bottom.png` pokazuje dół strony) i kończy
-działanie.
-
 ```powershell
 cd windows\BorderlessMouse
 dotnet build -c Release                                  # wymaga .NET 8 SDK
@@ -215,7 +207,7 @@ macos/
     Network/    ControlServer (TCP), DiscoveryResponder (UDP), AudioSender (UDP)
     Input/      InputInjector (CGEvent), KeyMap (scancode → kVK)
     Audio/      SystemAudioTap (Core Audio process tap)
-    Views/      ContentView (pasek boczny), Panes (formularze), pasek menu
+    Views/      ContentView (karty), Components (Card, SettingRow, StatusPill), pasek menu
 assets/logo/                 – wspólne logo + skrypt generujący .icns/.ico/.png
 .github/workflows/           – CI (build obu aplikacji) i Release (tag v* → GitHub Release)
 windows/
@@ -224,7 +216,7 @@ windows/
     Models/     Settings, Autostart (klucz Run w rejestrze)
     Net/        ControlClient (TCP), Discovery (UDP), AudioReceiver (UDP), ClipboardSync, Updater
     Audio/      JitterBufferProvider, AudioPlayer (NAudio/WASAPI)
-    Views/      MainWindow.axaml (AppWindow + SettingsExpander)
+    Views/      MainWindow.axaml (karty w AppWindow z Mica), SettingRow
     ViewModels/ MainViewModel
 ```
 
