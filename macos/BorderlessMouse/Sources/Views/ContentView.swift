@@ -224,6 +224,15 @@ struct SettingsCard: View {
                     .frame(width: 200)
             }
             Divider()
+            SettingRow(title: "Uruchamiaj przy logowaniu", subtitle: state.loginItemError ?? state.loginItemStatus) {
+                Toggle("", isOn: $state.settings.launchAtLogin).labelsHidden().toggleStyle(.switch)
+            }
+            Divider()
+            SettingRow(title: "Przy autostarcie nie otwieraj okna", subtitle: "Aplikacja czeka w pasku menu.") {
+                Toggle("", isOn: $state.settings.startHidden).labelsHidden().toggleStyle(.switch)
+                    .disabled(!state.settings.launchAtLogin)
+            }
+            Divider()
             SettingRow(title: "Port TCP", subtitle: "Zmiana restartuje nasłuchiwanie.") {
                 HStack {
                     TextField("47800", text: $portText)

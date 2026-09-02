@@ -15,6 +15,7 @@ struct MenuBarView: View {
         Toggle("Udostępniaj dźwięk", isOn: $state.settings.audioEnabled)
         Toggle("Wycisz Maca podczas streamu", isOn: $state.settings.muteLocalAudio)
         Toggle("Synchronizuj schowek", isOn: $state.settings.clipboardSyncEnabled)
+        Toggle("Uruchamiaj przy logowaniu", isOn: $state.settings.launchAtLogin)
         Divider()
         Button("Otwórz okno BorderlessMouse") {
             openWindow(id: "main")

@@ -34,6 +34,8 @@ public sealed class Settings
 
     public bool AutoCheckUpdates { get; set; } = true;
 
+    public bool StartMinimized { get; set; } = true;
+
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,

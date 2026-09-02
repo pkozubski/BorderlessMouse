@@ -71,6 +71,11 @@ public partial class MainViewModel : ObservableObject
         _exclusiveMode = _settings.ExclusiveMode;
         _clipboardSyncEnabled = _settings.ClipboardSyncEnabled;
         _autoCheckUpdates = _settings.AutoCheckUpdates;
+        _startMinimized = _settings.StartMinimized;
+        // stan autostartu bierzemy z systemu – rejestr jest źródłem prawdy
+        _launchAtLogin = Autostart.IsEnabled;
+        _autostartStatus = Autostart.StatusDescription;
+        Autostart.RefreshIfNeeded();
 
         RefreshAudioDevices();
         _selectedAudioDevice = AudioDevices.FirstOrDefault(d => d.Id == _settings.AudioDeviceId) ?? AudioDevices[0];
@@ -110,6 +115,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _exclusiveMode;
     [ObservableProperty] private bool _clipboardSyncEnabled;
     [ObservableProperty] private bool _autoCheckUpdates;
+    [ObservableProperty] private bool _launchAtLogin;
+    [ObservableProperty] private bool _startMinimized;
+    [ObservableProperty] private string _autostartStatus = "";
     [ObservableProperty] private DiscoveredPeer? _selectedPeer;
 
     // ------------------------------------------------------------------
@@ -259,6 +267,34 @@ public partial class MainViewModel : ObservableObject
         _settings.AutoCheckUpdates = value;
         SaveSettings();
     }
+
+    partial void OnLaunchAtLoginChanged(bool value)
+    {
+        if (_loading) return;
+        if (!OperatingSystem.IsWindows())
+        {
+            AutostartStatus = "Dostępne tylko na Windows.";
+            return;
+        }
+        try
+        {
+            Log(Autostart.SetEnabled(value));
+        }
+        catch (Exception ex)
+        {
+            Log("Autostart: " + ex.Message);
+        }
+        AutostartStatus = Autostart.StatusDescription;
+    }
+
+    partial void OnStartMinimizedChanged(bool value)
+    {
+        _settings.StartMinimized = value;
+        SaveSettings();
+    }
+
+    /// <summary>Wpis do dziennika, gdy aplikacja wystartowała do zasobnika.</summary>
+    public void LogBackgroundStart() => Log("Start w tle (autostart) – okno ukryte, ikona w zasobniku");
 
     /// <summary>Podpina schowek okna głównego (dostępny dopiero po utworzeniu okna).</summary>
     public void AttachClipboard(IClipboard? clipboard)

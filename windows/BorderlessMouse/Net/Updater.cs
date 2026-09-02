@@ -16,7 +16,7 @@ public sealed record ReleaseInfo(string Version, string Tag, string Notes, strin
 /// </summary>
 public sealed class Updater
 {
-    public const string Owner = "hermermarketing1-jpg";
+    public const string Owner = "pkozubski";
     public const string Repo = "BorderlessMouse";
     public const string AssetName = "BorderlessMouse-Windows-x64.exe";
     public const string ChecksumsName = "SHA256SUMS.txt";

@@ -2,8 +2,10 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Controls.Primitives;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using BorderlessMouse.ViewModels;
 using BorderlessMouse.Views;
 
@@ -29,9 +31,12 @@ public partial class App : Application
             _mainWindow = new MainWindow { DataContext = _viewModel };
             desktop.MainWindow = _mainWindow;
             desktop.ShutdownRequested += (_, _) => _viewModel.Shutdown();
-            _mainWindow.Show();
+            var background = desktop.Args?.Contains(Models.Autostart.BackgroundArgument) == true
+                             && _viewModel.StartMinimized;
+            if (!background) _mainWindow.Show();
             _viewModel.AttachClipboard(_mainWindow.Clipboard);
             _viewModel.Start();
+            if (background) _viewModel.LogBackgroundStart();
             HandleScreenshotFlag(desktop.Args);
         }
 
@@ -42,6 +47,7 @@ public partial class App : Application
     private void HandleScreenshotFlag(string[]? args)
     {
         if (args is null || _mainWindow is null) return;
+        if (!_mainWindow.IsVisible) _mainWindow.Show();
         var idx = Array.IndexOf(args, "--screenshot");
         if (idx < 0 || idx + 1 >= args.Length) return;
         var path = args[idx + 1];
@@ -49,16 +55,30 @@ public partial class App : Application
         {
             try
             {
-                var size = new PixelSize((int)_mainWindow.Bounds.Width * 2, (int)_mainWindow.Bounds.Height * 2);
-                using var bitmap = new RenderTargetBitmap(size, new Vector(192, 192));
-                bitmap.Render(_mainWindow);
-                bitmap.Save(path);
+                Capture(path);
+                // druga klatka: dół strony (dalsze grupy ustawień)
+                var scroll = _mainWindow.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+                if (scroll is not null)
+                {
+                    scroll.Offset = new Vector(0, scroll.Extent.Height);
+                    _mainWindow.UpdateLayout();
+                    Capture(Path.ChangeExtension(path, null) + "-bottom" + Path.GetExtension(path));
+                }
             }
             finally
             {
                 ExitApplication();
             }
         }, TimeSpan.FromSeconds(2));
+    }
+
+    private void Capture(string path)
+    {
+        if (_mainWindow is null) return;
+        var size = new PixelSize((int)_mainWindow.Bounds.Width * 2, (int)_mainWindow.Bounds.Height * 2);
+        using var bitmap = new RenderTargetBitmap(size, new Vector(192, 192));
+        bitmap.Render(_mainWindow);
+        bitmap.Save(path);
     }
 
     public void ShowMainWindow()

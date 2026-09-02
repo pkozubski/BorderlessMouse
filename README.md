@@ -2,8 +2,8 @@
 
 <p align="center"><img src="assets/logo/logo-256.png" width="128" alt="BorderlessMouse"></p>
 
-[![CI](https://github.com/hermermarketing1-jpg/BorderlessMouse/actions/workflows/ci.yml/badge.svg)](https://github.com/hermermarketing1-jpg/BorderlessMouse/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/hermermarketing1-jpg/BorderlessMouse)](https://github.com/hermermarketing1-jpg/BorderlessMouse/releases/latest)
+[![CI](https://github.com/pkozubski/BorderlessMouse/actions/workflows/ci.yml/badge.svg)](https://github.com/pkozubski/BorderlessMouse/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/pkozubski/BorderlessMouse)](https://github.com/pkozubski/BorderlessMouse/releases/latest)
 
 Współdzielenie **klawiatury i myszy** oraz **dźwięku** między Windows a macOS po sieci
 lokalnej – bez sterowników, bez chmury, z minimalnym opóźnieniem.
@@ -36,12 +36,12 @@ Szczegóły protokołu: [PROTOCOL.md](PROTOCOL.md).
 | | |
 |---|---|
 | macOS | 14.2 lub nowszy (Core Audio taps). Uprawnienia: **Dostępność** i **Nagrywanie dźwięku systemowego**. |
-| Windows | Windows 10/11 x64. Plik `BorderlessMouse-Windows-x64.exe` z [Releases](https://github.com/hermermarketing1-jpg/BorderlessMouse/releases/latest) nie wymaga instalowania .NET. |
+| Windows | Windows 10/11 x64. Plik `BorderlessMouse-Windows-x64.exe` z [Releases](https://github.com/pkozubski/BorderlessMouse/releases/latest) nie wymaga instalowania .NET. |
 | Sieć | Obie maszyny w tej samej sieci LAN (najlepiej kabel; Wi‑Fi też działa). |
 
 ## Pobieranie
 
-Gotowe pliki są w [GitHub Releases](https://github.com/hermermarketing1-jpg/BorderlessMouse/releases/latest):
+Gotowe pliki są w [GitHub Releases](https://github.com/pkozubski/BorderlessMouse/releases/latest):
 
 * `BorderlessMouse-macOS.zip` – uniwersalna aplikacja (Apple Silicon + Intel). Rozpakuj i przenieś
   do `~/Applications` (auto-updater potrzebuje prawa zapisu do katalogu aplikacji).

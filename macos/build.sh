@@ -33,6 +33,7 @@ compile() { # $1 = arch, $2 = output
     -target "$1-apple-macos${DEPLOY}" -sdk "$SDK" \
     -framework SwiftUI -framework AppKit -framework Network \
     -framework CoreAudio -framework AudioToolbox -framework CryptoKit \
+    -framework ServiceManagement \
     -o "$2" $SOURCES
 }
 

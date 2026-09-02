@@ -201,6 +201,21 @@
                 </ui:SettingsExpanderItem>
             </ui:SettingsExpander>
 
+            <!-- Uruchamianie -->
+            <ui:SettingsExpander Header="Uruchamianie" Description="{Binding AutostartStatus}">
+                <ui:SettingsExpander.IconSource>
+                    <ui:FontIconSource Glyph="&#xE7E8;" FontFamily="{StaticResource IconFont}" />
+                </ui:SettingsExpander.IconSource>
+                <ui:SettingsExpander.Footer>
+                    <ToggleSwitch Classes="pl" IsChecked="{Binding LaunchAtLogin}" />
+                </ui:SettingsExpander.Footer>
+                <ui:SettingsExpanderItem Content="Startuj zminimalizowany do zasobnika" Description="Przy autostarcie okno pozostaje ukryte; kliknij ikonę w zasobniku, aby je otworzyć.">
+                    <ui:SettingsExpanderItem.Footer>
+                        <ToggleSwitch Classes="pl" IsChecked="{Binding StartMinimized}" IsEnabled="{Binding LaunchAtLogin}" />
+                    </ui:SettingsExpanderItem.Footer>
+                </ui:SettingsExpanderItem>
+            </ui:SettingsExpander>
+
             <!-- Aktualizacje -->
             <ui:SettingsExpander Header="{Binding VersionLabel}" Description="{Binding UpdateStatusText}">
                 <ui:SettingsExpander.IconSource>

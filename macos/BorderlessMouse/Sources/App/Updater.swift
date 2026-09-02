@@ -7,7 +7,7 @@ import Foundation
 /// opcjonalnie podpisuje lokalnym certyfikatem i podmienia bundle.
 @MainActor
 final class Updater: ObservableObject {
-    static let owner = "hermermarketing1-jpg"
+    static let owner = "pkozubski"
     static let repo = "BorderlessMouse"
     static let assetName = "BorderlessMouse-macOS.zip"
     static let checksumsName = "SHA256SUMS.txt"

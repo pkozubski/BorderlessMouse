@@ -31,6 +31,9 @@ struct Settings: Codable, Equatable {
     var audioBufferFrames: Int = 256
     var clipboardSyncEnabled = true
     var autoCheckUpdates = true
+    var launchAtLogin = false
+    /// Przy starcie z logowania nie otwieraj okna – tylko ikona w pasku menu.
+    var startHidden = true
     /// Nazwa certyfikatu w pęku kluczy, którym updater podpisze pobraną wersję
     /// (żeby uprawnienia Dostępność przeżyły aktualizację). Puste = bez podpisywania.
     var codesignIdentity = ""

@@ -17,6 +17,9 @@ final class AppState: ObservableObject {
     @Published var settings: Settings {
         didSet {
             guard settings != oldValue else { return }
+            if settings.launchAtLogin != oldValue.launchAtLogin {
+                applyLaunchAtLogin(settings.launchAtLogin)
+            }
             settings.save()
             engine.update(config: settings.engineConfig)
         }
@@ -34,6 +37,8 @@ final class AppState: ObservableObject {
     @Published private(set) var audioSendErrors: UInt64 = 0
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var clipboardStatus = "Brak synchronizacji w tej sesji"
+    @Published private(set) var loginItemStatus = LoginItem.statusDescription
+    @Published var loginItemError: String?
     @Published private(set) var log: [LogEntry] = []
 
     let engine: Engine
@@ -50,6 +55,9 @@ final class AppState: ObservableObject {
         engine.onEvent = { [weak self] event in
             Task { @MainActor in self?.apply(event) }
         }
+        // stan autostartu bierzemy z systemu – to on jest źródłem prawdy
+        settings.launchAtLogin = LoginItem.isEnabled
+        LoginItem.refreshIfNeeded()
         accessibilityGranted = InputInjector.isAccessibilityTrusted
         engine.setAccessibilityGranted(accessibilityGranted)
         engine.start()
@@ -83,6 +91,20 @@ final class AppState: ObservableObject {
                 await self.updater.check(silent: true)
             }
         }
+    }
+
+    private func applyLaunchAtLogin(_ enabled: Bool) {
+        do {
+            let mechanism = try LoginItem.setEnabled(enabled)
+            loginItemError = nil
+            appendLog(enabled
+                      ? "Autostart włączony (\(mechanism == .service ? "element logowania" : "LaunchAgent"))"
+                      : "Autostart wyłączony")
+        } catch {
+            loginItemError = error.localizedDescription
+            appendLog("Autostart: \(error.localizedDescription)")
+        }
+        loginItemStatus = LoginItem.statusDescription
     }
 
     func checkForUpdates() {
