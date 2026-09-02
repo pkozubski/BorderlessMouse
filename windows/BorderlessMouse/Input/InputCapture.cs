@@ -110,7 +110,11 @@ public sealed class InputCapture : IDisposable
     public void Toggle()
     {
         if (IsRemote) ReturnToLocal(0.5f, sendRelease: true);
-        else if (_client.IsConnected && Enabled) SwitchToRemote(EntryEdge(), 0.5f, MonitorRectAt(_parked));
+        else if (_client.IsConnected && Enabled)
+        {
+            GetCursorPos(out var cursor);
+            SwitchToRemote(EntryEdge(), 0.5f, MonitorRectAt(cursor));
+        }
     }
 
     // ---------------- mysz ----------------
@@ -123,7 +127,8 @@ public sealed class InputCapture : IDisposable
         {
             if (msg == WM_MOUSEMOVE && Enabled && _client.IsConnected
                 && DateTime.UtcNow >= _suppressEdgeUntil
-                && TryDetectEdge(d.pt, out var ratio, out var monitor))
+                && TryDetectEdge(d.pt, out var ratio, out var monitor)
+                && !AutomaticSwitchGuard.IsBlocked())
             {
                 SwitchToRemote(EntryEdge(), ratio, monitor);
                 return true;

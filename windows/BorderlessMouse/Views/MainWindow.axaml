@@ -105,7 +105,7 @@
                     </StackPanel>
 
                     <views:SettingRow Title="Udostępniaj klawiaturę i mysz"
-                                      Subtitle="Po dojechaniu kursorem do krawędzi ekranu sterujesz Makiem.">
+                                      Subtitle="Krawędź przełącza na Maca. Pełny ekran i przechwycona mysz blokują automatyczne przejście.">
                         <ToggleSwitch Classes="compact" IsChecked="{Binding InputSharingEnabled}" />
                     </views:SettingRow>
                     <Rectangle Classes="divider" />

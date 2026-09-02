@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text;
 
 namespace BorderlessMouse.Input;
 
@@ -29,6 +30,7 @@ public static class NativeMethods
     public const uint LLKHF_EXTENDED = 0x01;
     public const uint LLKHF_INJECTED = 0x10;
     public const uint LLMHF_INJECTED = 0x01;
+    public const uint CURSOR_SHOWING = 0x00000001;
 
     public const int SM_CXSCREEN = 0;
     public const int SM_CYSCREEN = 1;
@@ -105,6 +107,15 @@ public static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct CURSORINFO
+    {
+        public uint cbSize;
+        public uint flags;
+        public IntPtr hCursor;
+        public POINT ptScreenPos;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {
         public int Left;
@@ -161,6 +172,37 @@ public static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetCursorInfo(ref CURSORINFO info);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetClipCursor(out RECT rect);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDesktopWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetShellWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
 
     /// <summary>Licznik widoczności kursora dla okien tego wątku (ujemny = ukryty).</summary>
     [DllImport("user32.dll")]

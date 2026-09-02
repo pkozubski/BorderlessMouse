@@ -145,6 +145,17 @@ Aplikacja ma też ikonę w pasku menu z szybkimi przełącznikami.
 Ustawienia są zapisywane w `%APPDATA%\BorderlessMouse\settings.json`; zamknięcie okna chowa
 aplikację do zasobnika (wyjście przez menu ikony).
 
+### Gry i pełny ekran
+
+Automatyczne przejście kursora na Maca jest wstrzymane, gdy aktywna aplikacja zajmuje
+pełny ekran (także okno bez ramek), ukrywa kursor lub ogranicza jego ruch. Chroni to
+przed przypadkowym oddaniem sterowania podczas grania, również gdy gra nie zatrzymuje
+systemowego kursora na środku ekranu. Dotyczy to także innych aplikacji pełnoekranowych.
+
+Po **Alt+Tab** do zwykłego okna lub na pulpit przełączanie krawędzią wraca, gdy aplikacja
+zwolni mysz. **Scroll Lock** nadal przełącza ręcznie w obie strony, także podczas gry.
+Dźwięk i schowek działają przez cały czas.
+
 ## Opóźnienie i wydajność
 
 * **Wejście**: TCP z `TCP_NODELAY`, ramki 4–7 bajtów, zero buforowania po stronie Maca
