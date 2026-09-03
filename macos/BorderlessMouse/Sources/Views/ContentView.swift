@@ -521,8 +521,8 @@ struct SettingsPage: View {
                 DisclosureGroup("Zaawansowane: podpisywanie aktualizacji", isExpanded: $showAdvanced) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(L10n.text(
-                            "Oficjalne wydania są podpisane i notaryzowane, a updater sprawdza certyfikat wydawcy. Pole poniżej zostaw puste, chyba że podpisujesz lokalne buildy własnym certyfikatem.",
-                            "Official releases are signed and notarized, and the updater verifies the publisher certificate. Leave the field below empty unless you sign local builds with your own certificate."))
+                            "Bezpłatna beta ma stały podpis bundle i osobny podpis ECDSA aktualizacji, ale nie jest notaryzowana przez Apple. Pole poniżej zostaw puste, chyba że podpisujesz lokalne buildy własnym certyfikatem.",
+                            "The free beta has a stable bundle signature and a separate ECDSA update signature, but is not notarized by Apple. Leave the field below empty unless you sign local builds with your own certificate."))
                             .font(.caption).foregroundStyle(.secondary)
                         TextField("", text: $state.settings.codesignIdentity, prompt: Text("Opcjonalny własny certyfikat"))
                             .labelsHidden()

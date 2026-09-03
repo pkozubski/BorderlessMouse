@@ -61,6 +61,14 @@ struct SecurityChecks {
         let wrongSecret = Data(repeating: 0xAA, count: 16)
         let impostor = SecureSession(secret: wrongSecret, clientNonce: clientNonce, serverNonce: serverNonce, role: .client)
         expect(server.open(impostor.seal(ping)!) == nil, "wrong pairing key rejected")
-        print("✓ Security: pairing vectors, HKDF, AES-GCM, tamper and replay protection")
+
+        let updateVector = Data("BorderlessMouse updater signature test vector v1".utf8)
+        let updateSignature = Data(base64Encoded: "MEUCIQDp/vz4PuRSUycKTyZluJFz+XxYhRqOXtzU4wQ+RkI0ZQIgeGsnsrQKY2cVBzv+KKLDqsmH1lpZ7XDYI+E7TT/VSS4=")!
+        expect(ArtifactSignature.verify(data: updateVector, signatureData: updateSignature), "release artifact signature vector")
+        var alteredUpdateVector = updateVector
+        alteredUpdateVector[0] ^= 1
+        expect(!ArtifactSignature.verify(data: alteredUpdateVector, signatureData: updateSignature), "tampered release artifact rejected")
+        expect(!ArtifactSignature.verify(data: updateVector, signatureData: Data(updateSignature.dropLast())), "truncated release signature rejected")
+        print("✓ Security: pairing, encrypted sessions, replay protection and signed update artifacts")
     }
 }

@@ -21,6 +21,7 @@ unsupported because it did not authenticate or encrypt LAN traffic.
 - Control, clipboard and status frames use AES-256-GCM with directional keys.
 - Audio packets are authenticated, encrypted, source-bound and replay-protected.
 - A new unauthenticated connection cannot replace an active session.
-- Update installation requires a checksum and a pinned publisher signature.
+- Update installation requires a checksum and a detached ECDSA signature from the
+  project-owned update key. macOS additionally verifies the complete app bundle signature.
 
 See `PROTOCOL.md` for the wire format and trust boundaries.

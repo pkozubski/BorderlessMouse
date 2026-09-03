@@ -36,7 +36,7 @@ struct Settings: Codable, Equatable {
     var startHidden = true
     var hasCompletedOnboarding = false
     /// Nazwa certyfikatu w pęku kluczy, którym updater podpisze pobraną wersję
-    /// (dla lokalnych buildów). Puste = zachowaj stały podpis wydawcy z GitHuba.
+    /// (dla lokalnych buildów). Puste = zachowaj stały podpis bundle z GitHuba.
     var codesignIdentity = ""
 
     init() {}

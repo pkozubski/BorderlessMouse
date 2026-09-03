@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — commercial beta foundation
+## 2.0.0 — 2026-09-03 — free beta
 
 ### Security
 
@@ -10,7 +10,7 @@
 - Encrypted audio packets and added source, size, session and replay validation.
 - Prevented unauthenticated connections from replacing an active session.
 - Bounded the Windows send queue and fixed framed PONG responses.
-- Made checksums and pinned publisher signatures mandatory for Windows updates.
+- Made checksums and project-owned ECDSA signatures mandatory for all updates.
 
 ### Product
 
@@ -25,7 +25,8 @@
 
 - Enabled the macOS hardened runtime.
 - Restricted certificate use to the release workflow.
-- Added required macOS notarization and Windows Authenticode signing steps.
+- Added a zero-cost beta release path with explicit first-launch trust warnings.
+- Reserved Apple notarization and trusted Windows Authenticode for the public commercial release.
 - Added download size limits and rollback-safe updater replacement.
 - Locked the Windows NuGet dependency graph for reproducible CI and release restores.
 - Bundled complete third-party notices, including Inter OFL and ANGLE terms, with release artifacts.

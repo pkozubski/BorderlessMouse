@@ -9,11 +9,12 @@ using static BorderlessMouse.Localization.L10n;
 
 namespace BorderlessMouse.Net;
 
-public sealed record ReleaseInfo(string Version, string Tag, string Notes, string PageUrl, string AssetUrl, string ChecksumsUrl);
+public sealed record ReleaseInfo(string Version, string Tag, string Notes, string PageUrl,
+    string AssetUrl, string ChecksumsUrl, string SignatureUrl);
 
 /// <summary>
 /// Auto-updater oparty o GitHub Releases: pobiera BorderlessMouse-Windows-x64.exe,
-/// weryfikuje SHA-256 (SHA256SUMS.txt) i podmienia bieżący plik exe skryptem
+/// weryfikuje SHA-256 oraz projektowy podpis ECDSA i podmienia bieżący plik exe skryptem
 /// uruchamianym po zamknięciu aplikacji.
 /// </summary>
 public sealed class Updater
@@ -22,6 +23,7 @@ public sealed class Updater
     public const string Repo = "BorderlessMouse";
     public const string AssetName = "BorderlessMouse-Windows-x64.exe";
     public const string ChecksumsName = "SHA256SUMS.txt";
+    public const string SignatureName = AssetName + ".sig";
     private const long MaximumDownloadBytes = 300L * 1024 * 1024;
 
     private static readonly HttpClient Http = CreateClient();
@@ -58,10 +60,6 @@ public sealed class Updater
         return false;
     }
 
-    private static string PublisherCertificateSha256 =>
-        Assembly.GetEntryAssembly()?.GetCustomAttributes<AssemblyMetadataAttribute>()
-            .FirstOrDefault(a => a.Key == "WindowsPublisherCertificateSha256")?.Value ?? "";
-
     /// <summary>Zwraca najnowsze wydanie z zasobem dla Windows albo null, gdy brak wydań.</summary>
     public async Task<ReleaseInfo?> CheckAsync(CancellationToken ct)
     {
@@ -73,17 +71,19 @@ public sealed class Updater
         var tag = root.GetProperty("tag_name").GetString() ?? "";
         var notes = root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "";
         var page = root.GetProperty("html_url").GetString() ?? "";
-        string? asset = null, checksums = null;
+        string? asset = null, checksums = null, signature = null;
         foreach (var a in root.GetProperty("assets").EnumerateArray())
         {
             var name = a.GetProperty("name").GetString();
             var url = a.GetProperty("browser_download_url").GetString();
             if (name == AssetName) asset = url;
             if (name == ChecksumsName) checksums = url;
+            if (name == SignatureName) signature = url;
         }
         if (asset is null) return null;
         if (checksums is null) throw new InvalidDataException(T("Wydanie nie zawiera wymaganego pliku SHA256SUMS.txt.", "The release does not include the required SHA256SUMS.txt file."));
-        return new ReleaseInfo(tag.TrimStart('v'), tag, notes, page, asset, checksums);
+        if (signature is null) throw new InvalidDataException(T("Wydanie nie zawiera podpisu kryptograficznego aplikacji Windows.", "The release does not include a cryptographic signature for the Windows app."));
+        return new ReleaseInfo(tag.TrimStart('v'), tag, notes, page, asset, checksums, signature);
     }
 
     /// <summary>Pobiera, weryfikuje i przygotowuje podmianę exe. Po powrocie należy zakończyć aplikację.</summary>
@@ -126,13 +126,16 @@ public sealed class Updater
         }
         progress.Report(1);
 
+        byte[] actualHash;
         await using (var stream = File.OpenRead(newExe))
         {
-            var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
+            actualHash = await SHA256.HashDataAsync(stream, ct);
+            var actual = Convert.ToHexString(actualHash).ToLowerInvariant();
             if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual), Convert.FromHexString(expectedChecksum)))
                 throw new InvalidOperationException(T("Suma SHA-256 pobranego pliku nie zgadza się z wydaniem.", "The downloaded file does not match the release SHA-256 checksum."));
         }
-        AuthenticodeVerifier.Verify(newExe, PublisherCertificateSha256);
+        var signature = await DownloadSignatureAsync(release.SignatureUrl, ct);
+        UpdateSignatureVerifier.VerifyHash(actualHash, signature);
 
         var script = Path.Combine(dir, "swap.cmd");
         File.WriteAllText(script, """
@@ -184,5 +187,25 @@ public sealed class Updater
         psi.ArgumentList.Add(newExe);
         psi.ArgumentList.Add(target);
         Process.Start(psi);
+    }
+
+    private static async Task<byte[]> DownloadSignatureAsync(string url, CancellationToken ct)
+    {
+        using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is > 256)
+            throw new InvalidDataException(T("Plik podpisu aktualizacji jest za duży.", "The update signature file is too large."));
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        var buffer = new byte[257];
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var count = await stream.ReadAsync(buffer.AsMemory(total, buffer.Length - total), ct);
+            if (count == 0) break;
+            total += count;
+        }
+        if (total > 256)
+            throw new InvalidDataException(T("Plik podpisu aktualizacji jest za duży.", "The update signature file is too large."));
+        return buffer[..total];
     }
 }

@@ -53,10 +53,13 @@ Gotowe pliki są w [GitHub Releases](https://github.com/pkozubski/BorderlessMous
   do `~/Applications` (auto-updater potrzebuje prawa zapisu do katalogu aplikacji).
 * `BorderlessMouse-Windows-x64.exe` – pojedynczy plik, bez instalatora.
 * `SHA256SUMS.txt` – sumy kontrolne używane też przez updater.
+* pliki `*.sig` – podpisy ECDSA weryfikowane przez obie aplikacje.
 
-Publiczne wydania komercyjne muszą być podpisane certyfikatem Apple Developer ID,
-notaryzowane i staplowane, a plik Windows podpisany Authenticode z zaufanym znacznikiem
-czasu. Workflow wydania zatrzymuje publikację, jeśli któregokolwiek poświadczenia brakuje.
+Obecne wydanie jest bezpłatną betą. Przy pierwszym uruchomieniu Windows może pokazać
+„Unknown publisher” – wybierz **More info → Run anyway**. Na macOS użyj
+**Ustawienia systemowe → Prywatność i ochrona → Otwórz mimo to**. Nie wyłączaj globalnie
+SmartScreen ani Gatekeepera. Publiczne wydanie komercyjne docelowo otrzyma Apple Developer
+ID z notarizacją oraz zaufany podpis Windows.
 
 ## Autostart
 
@@ -110,29 +113,31 @@ W tym trybie aplikacja nie łączy się z niczym i pokazuje przykładowe dane.
 ## Auto-updater
 
 Obie aplikacje sprawdzają najnowsze wydanie na GitHubie (5 s po starcie i co 6 godzin, można
-wyłączyć w karcie **Aktualizacje**). Aktualizacja jest pobierana, weryfikowana sumą SHA-256 i
-instalowana jednym kliknięciem, po czym aplikacja uruchamia się ponownie.
+wyłączyć w karcie **Aktualizacje**). Aktualizacja jest pobierana, weryfikowana sumą SHA-256
+oraz przypiętym podpisem ECDSA i instalowana jednym kliknięciem, po czym aplikacja uruchamia
+się ponownie. Klucz prywatny nie znajduje się w repozytorium ani w aplikacji.
 
-* **Windows**: updater wymaga SHA-256 i prawidłowego Authenticode od przypiętego certyfikatu
-  wydawcy. Podmiana zachowuje poprzedni plik do chwili poprawnego restartu i cofa zmianę
-  po błędzie.
-* **macOS**: updater wymaga SHA-256 i podpisu zgodnego z publicznym certyfikatem wydawcy.
-  Bundle jest podmieniany dopiero po weryfikacji, z lokalną kopią do wycofania operacji.
+* **Windows**: podpis projektu chroni darmową betę przed podmienioną aktualizacją, ale nie
+  usuwa ostrzeżenia „Unknown publisher” przy pierwszym pobraniu. Podmiana zachowuje poprzedni
+  plik do chwili poprawnego restartu i cofa zmianę po błędzie.
+* **macOS**: oprócz podpisu artefaktu updater sprawdza stały podpis całego bundle. Bundle jest
+  podmieniany dopiero po obu weryfikacjach, z lokalną kopią do wycofania operacji.
 
 Nowe wydanie robi się jednym tagiem:
 
 ```bash
-git tag v1.1.0 && git push --tags
+git tag -a v2.0.0 -m "BorderlessMouse v2.0.0" && git push origin v2.0.0
 ```
 
-Workflow `.github/workflows/release.yml` buduje obie aplikacje, liczy sumy i publikuje release.
+Workflow `.github/workflows/release.yml` buduje obie aplikacje, liczy sumy, podpisuje oba
+artefakty i publikuje release.
 
-Konfiguracja podpisów, notaryzacji i bramek wydania jest opisana w
+Konfiguracja bezpłatnej bety oraz późniejszego płatnego wydania jest opisana w
 [docs/RELEASE.md](docs/RELEASE.md). Klucze prywatne nie trafiają do repozytorium ani
 artefaktów i są dostępne tylko w chronionym środowisku `production-release`.
 
-CI i wydanie sprawdzają zgodność podpisu dwóch różnych buildów oraz odrzucanie
-uszkodzonych, niepodpisanych i podpisanych ad-hoc aktualizacji.
+CI sprawdza stały wektor klucza wydania i odrzucanie zmienionych danych, a workflow przed
+publikacją ponownie weryfikuje podpisy rzeczywistych artefaktów.
 
 ## Uruchomienie krok po kroku
 
@@ -261,7 +266,7 @@ windows/
   BorderlessMouse/
     Input/      NativeMethods, LowLevelHooks, NativeInputWindow (Raw Input + hider), InputCapture
     Models/     Settings, Autostart (klucz Run w rejestrze)
-    Security/   kod parowania, DPAPI, HMAC/HKDF, AES-GCM, weryfikacja Authenticode
+    Security/   kod parowania, DPAPI, HMAC/HKDF, AES-GCM, podpisy aktualizacji ECDSA
     Localization/ polski i angielski interfejs
     Net/        ControlClient (TCP), Discovery (UDP), AudioReceiver (UDP), ClipboardSync, Updater
     Audio/      JitterBufferProvider, AudioPlayer (NAudio/WASAPI)

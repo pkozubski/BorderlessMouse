@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Headless;
@@ -216,7 +217,14 @@ internal static class Program
         Expect(!Frame.TryParseSingle(status.Concat(new byte[] { 0 }).ToArray(), out _, out _), "trailing bytes rejected");
         var impostor = new SecureSession(Enumerable.Repeat((byte)0xAA, 16).ToArray(), clientNonce, serverNonce, SecureSession.SessionRole.Client);
         Expect(server.Open(impostor.Seal(ping)!) is null, "wrong pairing key rejected");
-        Console.WriteLine("✓ Security: pairing vectors, HKDF, AES-GCM, tamper and replay protection");
+
+        var updateVector = Encoding.UTF8.GetBytes("BorderlessMouse updater signature test vector v1");
+        var updateSignature = Convert.FromBase64String("MEUCIQDp/vz4PuRSUycKTyZluJFz+XxYhRqOXtzU4wQ+RkI0ZQIgeGsnsrQKY2cVBzv+KKLDqsmH1lpZ7XDYI+E7TT/VSS4=");
+        Expect(UpdateSignatureVerifier.VerifyData(updateVector, updateSignature), "release artifact signature vector");
+        updateVector[0] ^= 1;
+        Expect(!UpdateSignatureVerifier.VerifyData(updateVector, updateSignature), "tampered release artifact rejected");
+        Expect(!UpdateSignatureVerifier.VerifyData(Encoding.UTF8.GetBytes("BorderlessMouse updater signature test vector v1"), updateSignature[..^1]), "truncated release signature rejected");
+        Console.WriteLine("✓ Security: pairing, encrypted sessions, replay protection and signed update artifacts");
     }
 }
 

@@ -3,14 +3,15 @@ import CryptoKit
 import Foundation
 
 /// Auto-updater oparty o GitHub Releases: sprawdza najnowszy tag, pobiera
-/// `BorderlessMouse-macOS.zip`, weryfikuje SHA-256 (SHA256SUMS.txt),
-/// sprawdza stały certyfikat wydawcy, opcjonalnie podpisuje lokalnym certyfikatem i podmienia bundle.
+/// `BorderlessMouse-macOS.zip`, weryfikuje SHA-256, projektowy podpis ECDSA
+/// i stały certyfikat wydawcy, a następnie atomowo podmienia bundle.
 @MainActor
 final class Updater: ObservableObject {
     static let owner = "pkozubski"
     static let repo = "BorderlessMouse"
     static let assetName = "BorderlessMouse-macOS.zip"
     static let checksumsName = "SHA256SUMS.txt"
+    static let signatureName = "BorderlessMouse-macOS.zip.sig"
     private static let maximumDownloadBytes = 300 * 1024 * 1024
 
     struct Release: Equatable {
@@ -20,6 +21,7 @@ final class Updater: ObservableObject {
         let pageURL: URL
         let assetURL: URL
         let checksumsURL: URL?
+        let signatureURL: URL
     }
 
     enum State: Equatable {
@@ -80,16 +82,20 @@ final class Updater: ObservableObject {
               let assets = json["assets"] as? [[String: Any]] else { throw UpdaterError.malformed }
         var assetURL: URL?
         var checksumsURL: URL?
+        var signatureURL: URL?
         for asset in assets {
             guard let name = asset["name"] as? String,
                   let url = (asset["browser_download_url"] as? String).flatMap(URL.init(string:)) else { continue }
             if name == Self.assetName { assetURL = url }
             if name == Self.checksumsName { checksumsURL = url }
+            if name == Self.signatureName { signatureURL = url }
         }
         guard let assetURL else { return nil }
+        guard let signatureURL else { throw UpdaterError.missingSignature }
         let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
         return Release(version: version, tag: tag, notes: (json["body"] as? String) ?? "",
-                       pageURL: page, assetURL: assetURL, checksumsURL: checksumsURL)
+                       pageURL: page, assetURL: assetURL, checksumsURL: checksumsURL,
+                       signatureURL: signatureURL)
     }
 
     static func isNewer(_ candidate: String, than current: String) -> Bool {
@@ -117,6 +123,7 @@ final class Updater: ObservableObject {
             state = .installing
             guard let checksumsURL = release.checksumsURL else { throw UpdaterError.missingChecksum }
             try await verifyChecksum(of: zipURL, against: checksumsURL)
+            try await verifySignature(of: zipURL, against: release.signatureURL)
             let staging = zipURL.deletingLastPathComponent().appendingPathComponent("unpacked", isDirectory: true)
             try? FileManager.default.removeItem(at: staging)
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -194,8 +201,26 @@ final class Updater: ObservableObject {
             .first(where: { $0.count == 2 && $0[1] == Self.assetName }),
               let expected = entry.first,
               expected.count == 64, expected.allSatisfy({ $0.isHexDigit }) else { throw UpdaterError.missingChecksum }
-        let digest = SHA256.hash(data: try Data(contentsOf: file)).map { String(format: "%02x", $0) }.joined()
+        let digest = try ArtifactSignature.sha256Hex(of: file)
         guard digest == String(expected).lowercased() else { throw UpdaterError.checksumMismatch }
+    }
+
+    private func verifySignature(of file: URL, against signatureURL: URL) async throws {
+        var request = URLRequest(url: signatureURL)
+        request.setValue("BorderlessMouse-macOS/\(Self.currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw UpdaterError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        if http.expectedContentLength > 256 { throw UpdaterError.invalidSignatureFile }
+        var signature = Data()
+        signature.reserveCapacity(80)
+        for try await byte in bytes {
+            guard signature.count < 256 else { throw UpdaterError.invalidSignatureFile }
+            signature.append(byte)
+        }
+        try ArtifactSignature.verify(file: file, signatureData: signature)
     }
 
     private func swapAndRelaunch(newApp: URL) throws {
@@ -255,6 +280,8 @@ final class Updater: ObservableObject {
         case malformed
         case noAppInArchive
         case missingChecksum
+        case missingSignature
+        case invalidSignatureFile
         case checksumMismatch
         case downloadTooLarge
         case adHocIdentity
@@ -267,6 +294,8 @@ final class Updater: ObservableObject {
             case .malformed: return L10n.text("Nieoczekiwana odpowiedź GitHuba", "Unexpected GitHub response")
             case .noAppInArchive: return L10n.text("W archiwum nie ma aplikacji", "The archive does not contain the app")
             case .missingChecksum: return L10n.text("W wydaniu brakuje prawidłowej sumy SHA-256 dla aplikacji", "The release has no valid SHA-256 checksum for the app")
+            case .missingSignature: return L10n.text("W wydaniu brakuje podpisu kryptograficznego aplikacji", "The release has no cryptographic signature for the app")
+            case .invalidSignatureFile: return L10n.text("Plik podpisu aktualizacji jest nieprawidłowy", "The update signature file is invalid")
             case .checksumMismatch: return L10n.text("Suma SHA-256 pobranego pliku nie zgadza się z wydaniem", "The downloaded file does not match the release SHA-256 checksum")
             case .downloadTooLarge: return L10n.text("Plik aktualizacji przekracza limit 300 MiB", "The update exceeds the 300 MiB limit")
             case .adHocIdentity: return L10n.text("Podpis ad-hoc nie zachowuje uprawnień. Zostaw pole certyfikatu puste, aby użyć stałego podpisu wydawcy.", "An ad-hoc signature cannot preserve permissions. Leave the certificate field empty to use the publisher signature.")

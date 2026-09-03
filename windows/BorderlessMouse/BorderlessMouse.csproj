@@ -19,14 +19,9 @@
     <Version>1.0.0</Version>
     <Authors>BorderlessMouse</Authors>
     <Product>BorderlessMouse</Product>
-    <WindowsPublisherCertificateSha256 Condition="'$(WindowsPublisherCertificateSha256)' == ''">UNCONFIGURED</WindowsPublisherCertificateSha256>
     <!-- Kod specyficzny dla Windows jest oznaczony [SupportedOSPlatform("windows")]; kompiluje się też na macOS/Linux. -->
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
-
-  <ItemGroup>
-    <AssemblyMetadata Include="WindowsPublisherCertificateSha256" Value="$(WindowsPublisherCertificateSha256)" />
-  </ItemGroup>
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
