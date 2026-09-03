@@ -12,7 +12,7 @@ public sealed record DiscoveredPeer(string Name, string Address, int Port)
     public string Display => $"{Name}  ·  {Address}";
 }
 
-/// <summary>Wysyła broadcast "BLM1?" i zbiera odpowiedzi Maców.</summary>
+/// <summary>Wysyła broadcast "BLM2?" i zbiera odpowiedzi Maców.</summary>
 public sealed class DiscoveryClient : IDisposable
 {
     public event Action<DiscoveredPeer>? PeerFound;

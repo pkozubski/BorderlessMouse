@@ -2,14 +2,19 @@ import Foundation
 
 /// Stałe protokołu – muszą być zgodne z PROTOCOL.md i implementacją Windows.
 enum ProtocolConstants {
-    static let version: UInt8 = 1
+    static let version: UInt8 = 2
     static let defaultControlPort: UInt16 = 47800
     static let discoveryPort: UInt16 = 47801
-    static let discoveryRequest = "BLM1?"
-    static let discoveryReply = "BLM1!"
+    static let discoveryRequest = "BLM2?"
+    static let discoveryReply = "BLM2!"
     static let audioMagic: UInt16 = 0x4D42
+    static let audioVersion: UInt8 = 2
+    static let audioHeaderBytes = 32
+    static let audioTagBytes = 16
     /// Maksymalny rozmiar długiej ramki (ochrona przed błędnym nadawcą).
     static let maxLongFrame = maxClipboardImageBytes + 1
+    /// Zewnętrzna ramka SECURE zawiera zaszyfrowaną ramkę aplikacyjną i narzut AEAD.
+    static let maxWireFrame = maxLongFrame + 64
     /// Limit tekstu schowka.
     static let maxClipboardBytes = 1024 * 1024
     static let maxClipboardImageBytes = 32 * 1024 * 1024
@@ -18,7 +23,11 @@ enum ProtocolConstants {
 
 enum MessageType: UInt8 {
     case hello = 0x01
-    case welcome = 0x02
+    case challenge = 0x02
+    case authenticate = 0x03
+    case secure = 0x04
+    case reject = 0x05
+    case ready = 0x06
     case mouseMove = 0x10
     case mouseButton = 0x11
     case mouseWheel = 0x12
@@ -148,7 +157,7 @@ struct ByteWriter {
 /// jako długie ramki (`len = 0xFF` + `u32 length`).
 enum Frame {
     static func make(_ type: MessageType, _ payload: [UInt8] = []) -> Data {
-        precondition(payload.count <= ProtocolConstants.maxLongFrame, "payload too large")
+        precondition(payload.count <= ProtocolConstants.maxWireFrame, "payload too large")
         var out = [UInt8]()
         if payload.count < 255 {
             out.reserveCapacity(payload.count + 2)
@@ -172,11 +181,41 @@ enum Frame {
         make(.clipboard, [content.format.rawValue] + content.data)
     }
 
-    static func welcome(name: String) -> Data {
+    static func hello(name: String, nonce: Data) -> Data {
+        precondition(nonce.count == ControlCrypto.nonceBytes)
         var w = ByteWriter()
         w.u8(ProtocolConstants.version)
-        w.string(String(name.utf8.prefix(200))!)
-        return make(.welcome, w.bytes)
+        w.raw(Array(nonce))
+        w.string(String(decoding: name.utf8.prefix(200), as: UTF8.self))
+        return make(.hello, w.bytes)
+    }
+
+    static func challenge(name: String, nonce: Data, proof: Data) -> Data {
+        precondition(nonce.count == ControlCrypto.nonceBytes && proof.count == ControlCrypto.proofBytes)
+        var w = ByteWriter()
+        w.u8(ProtocolConstants.version)
+        w.raw(Array(nonce))
+        w.raw(Array(proof))
+        w.string(String(decoding: name.utf8.prefix(200), as: UTF8.self))
+        return make(.challenge, w.bytes)
+    }
+
+    static func authenticate(_ proof: Data) -> Data {
+        precondition(proof.count == ControlCrypto.proofBytes)
+        return make(.authenticate, Array(proof))
+    }
+
+    static func secure(_ envelope: Data) -> Data { make(.secure, Array(envelope)) }
+
+    static func ready(name: String) -> Data {
+        var w = ByteWriter()
+        w.u8(ProtocolConstants.version)
+        w.string(String(decoding: name.utf8.prefix(200), as: UTF8.self))
+        return make(.ready, w.bytes)
+    }
+
+    static func reject(_ reason: String) -> Data {
+        make(.reject, Array(String(decoding: reason.utf8.prefix(200), as: UTF8.self).utf8))
     }
 
     static func leave(edge: ScreenEdge, ratio: Float) -> Data {
@@ -206,5 +245,20 @@ enum Frame {
         var w = ByteWriter()
         w.u64(ts)
         return make(.ping, w.bytes)
+    }
+
+    /// Odszyfrowana koperta zawsze zawiera dokładnie jedną kompletną ramkę.
+    static func parseSingle(_ data: Data) -> (MessageType, [UInt8])? {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 2, let type = MessageType(rawValue: bytes[0]) else { return nil }
+        var length = Int(bytes[1])
+        var header = 2
+        if length == 0xFF {
+            guard bytes.count >= 6 else { return nil }
+            length = Int(bytes[2]) | (Int(bytes[3]) << 8) | (Int(bytes[4]) << 16) | (Int(bytes[5]) << 24)
+            header = 6
+        }
+        guard length <= ProtocolConstants.maxLongFrame, bytes.count == header + length else { return nil }
+        return (type, Array(bytes[header...]))
     }
 }

@@ -15,6 +15,7 @@ final class Engine {
         var scrollPixelsPerNotch: Double
         var audioBufferFrames: UInt32
         var clipboardSync: Bool
+        var pairingKey: Data
     }
 
     enum Event {
@@ -44,7 +45,7 @@ final class Engine {
     private let clipboard = ClipboardSync()
     private var tap: SystemAudioTap?
     private var sender: AudioSender?
-    private var audioRequest: (host: String, port: UInt16)?
+    private var audioRequest: (host: String, port: UInt16, key: Data, sessionID: UInt64)?
     private var peer: ControlServer.PeerInfo?
     private var statsTimer: DispatchSourceTimer?
     private var accessibilityGranted = false
@@ -55,17 +56,23 @@ final class Engine {
         self.config = config
         let nameBox = NameBox(config.deviceName)
         let portBox = PortBox(config.controlPort)
+        let pairingKeyBox = PairingKeyBox(config.pairingKey)
         self.nameBox = nameBox
         self.portBox = portBox
-        server = ControlServer(callbackQueue: eventsQueue) { nameBox.value }
+        self.pairingKeyBox = pairingKeyBox
+        server = ControlServer(callbackQueue: eventsQueue,
+                               localName: { nameBox.value },
+                               pairingKey: { pairingKeyBox.value })
         discovery = DiscoveryResponder(name: { nameBox.value }, controlPort: { portBox.value })
         wire()
     }
 
     private final class NameBox { var value: String; init(_ v: String) { value = v } }
     private final class PortBox { var value: UInt16; init(_ v: UInt16) { value = v } }
+    private final class PairingKeyBox { var value: Data; init(_ v: Data) { value = v } }
     private let nameBox: NameBox
     private let portBox: PortBox
+    private let pairingKeyBox: PairingKeyBox
 
     // MARK: - Cykl życia
 
@@ -75,9 +82,11 @@ final class Engine {
             self.server.start(port: self.config.controlPort)
             do {
                 try self.discovery.start()
-                self.emit(.log("Discovery UDP nasłuchuje na porcie \(ProtocolConstants.discoveryPort)"))
+                self.emit(.log(L10n.text("Discovery UDP nasłuchuje na porcie \(ProtocolConstants.discoveryPort)",
+                                         "Discovery is listening on UDP port \(ProtocolConstants.discoveryPort)")))
             } catch {
-                self.emit(.log("Discovery UDP nie wystartował: \(error.localizedDescription)"))
+                self.emit(.log(L10n.text("Discovery UDP nie wystartował: \(error.localizedDescription)",
+                                         "Discovery could not start: \(error.localizedDescription)")))
             }
         }
     }
@@ -105,10 +114,14 @@ final class Engine {
             self.config = newConfig
             self.nameBox.value = newConfig.deviceName
             self.portBox.value = newConfig.controlPort
+            self.pairingKeyBox.value = newConfig.pairingKey
             self.applyInjectorConfig()
             if old.controlPort != newConfig.controlPort {
                 self.server.stop()
                 self.server.start(port: newConfig.controlPort)
+            }
+            if old.pairingKey != newConfig.pairingKey {
+                self.server.disconnectPeer()
             }
             if old.inputEnabled && !newConfig.inputEnabled, self.injector.isActive {
                 self.injector.deactivate()
@@ -150,14 +163,16 @@ final class Engine {
 
         server.onListeningChanged = { [weak self] ok, error in
             self?.emit(.listening(ok, error))
-            if ok { self?.emit(.log("Nasłuchiwanie TCP na porcie \(self?.config.controlPort ?? 0)")) }
-            if let error { self?.emit(.log("Błąd nasłuchiwania: \(error)")) }
+            if ok { self?.emit(.log(L10n.text("Nasłuchiwanie TCP na porcie \(self?.config.controlPort ?? 0)",
+                                               "Listening on TCP port \(self?.config.controlPort ?? 0)"))) }
+            if let error { self?.emit(.log(L10n.text("Błąd nasłuchiwania: \(error)", "Listener error: \(error)"))) }
         }
         server.onPeerConnected = { [weak self] info in
             guard let self else { return }
             self.peer = info
             self.emit(.peerConnected(info))
-            self.emit(.log("Połączono: \(info.name) (\(info.address))"))
+            self.emit(.log(L10n.text("Połączono: \(info.name) (\(info.address))",
+                                     "Connected: \(info.name) (\(info.address))")))
             self.sendStatus()
         }
         server.onPeerDisconnected = { [weak self] in
@@ -166,10 +181,10 @@ final class Engine {
             self.injector.deactivate()
             self.stopAudioLocked(notify: true)
             self.emit(.peerDisconnected)
-            self.emit(.log("Rozłączono"))
+            self.emit(.log(L10n.text("Rozłączono", "Disconnected")))
         }
-        server.onMessage = { [weak self] type, payload in
-            self?.handle(type, payload)
+        server.onMessage = { [weak self] type, payload, sessionKeys in
+            self?.handle(type, payload, sessionKeys: sessionKeys)
         }
         injector.onLeave = { [weak self] edge, ratio in
             guard let self else { return }
@@ -215,7 +230,7 @@ final class Engine {
 
     // MARK: - Obsługa wiadomości (eventsQueue)
 
-    private func handle(_ type: MessageType, _ payload: [UInt8]) {
+    private func handle(_ type: MessageType, _ payload: [UInt8], sessionKeys: ControlServer.SessionKeys) {
         var r = ByteReader(payload)
         switch type {
         case .mouseMove:
@@ -241,8 +256,8 @@ final class Engine {
                 // natychmiast oddaj sterowanie
                 server.send(Frame.leave(edge: edge, ratio: ratio))
                 emit(.log(config.inputEnabled
-                          ? "Odrzucono wejście – brak uprawnienia Dostępność"
-                          : "Odrzucono wejście – odbiór wyłączony w ustawieniach"))
+                          ? L10n.text("Odrzucono wejście – brak uprawnienia Dostępność", "Input rejected — Accessibility permission is missing")
+                          : L10n.text("Odrzucono wejście – odbiór wyłączony w ustawieniach", "Input rejected — receiving is disabled in settings")))
                 return
             }
             injector.enter(edge: edge, ratio: ratio)
@@ -252,11 +267,11 @@ final class Engine {
             guard let peer else { return }
             guard config.audioEnabled else {
                 server.send(Frame.audioFormat(sampleRate: 0, channels: 0, format: .int16, status: 1,
-                                              message: "Udostępnianie dźwięku jest wyłączone na Macu"))
+                                              message: L10n.text("Udostępnianie dźwięku jest wyłączone na Macu", "Audio sharing is disabled on the Mac")))
                 return
             }
-            audioRequest = (peer.address, port)
-            startAudio(host: peer.address, port: port)
+            audioRequest = (peer.address, port, sessionKeys.audioKey, sessionKeys.audioSessionID)
+            startAudio(host: peer.address, port: port, key: sessionKeys.audioKey, sessionID: sessionKeys.audioSessionID)
         case .audioStop:
             stopAudioLocked(notify: true)
         case .clipboard:
@@ -272,18 +287,20 @@ final class Engine {
     /// Tworzenie tapu może zablokować wątek do czasu decyzji użytkownika w oknie
     /// zgody TCC ("nagrywanie dźwięku systemowego"), dlatego działa na osobnej
     /// kolejce, a wynik wraca na eventsQueue.
-    private func startAudio(host: String, port: UInt16) {
+    private func startAudio(host: String, port: UInt16, key: Data, sessionID: UInt64) {
         stopAudioLocked(notify: false)
         audioGeneration &+= 1
         let generation = audioGeneration
         let cfg = config
-        emit(.log("Uruchamianie przechwytywania audio → \(host):\(port)"))
+        emit(.log(L10n.text("Uruchamianie przechwytywania audio → \(host):\(port)",
+                            "Starting audio capture → \(host):\(port)")))
         audioQueue.async { [weak self] in
             let tap = SystemAudioTap()
             do {
                 try tap.start(muteLocal: cfg.muteLocalAudio, bufferFrames: cfg.audioBufferFrames)
-                guard let format = tap.format else { throw SystemAudioTap.TapError.unsupportedFormat("brak formatu") }
-                let sender = try AudioSender(host: host, port: port, channels: format.channels, format: .int16)
+                guard let format = tap.format else { throw SystemAudioTap.TapError.unsupportedFormat(L10n.text("brak formatu", "missing format")) }
+                let sender = try AudioSender(host: host, port: port, channels: format.channels,
+                                             format: .int16, key: key, sessionID: sessionID)
                 self?.eventsQueue.async {
                     guard let self, self.audioGeneration == generation, self.peer != nil else {
                         tap.stop()
@@ -297,11 +314,15 @@ final class Engine {
                     }
                     self.tap = tap
                     self.sender = sender
-                    let desc = "\(Int(format.sampleRate)) Hz · \(format.channels == 2 ? "stereo" : "\(format.channels) kan.") · 16-bit → \(host):\(port)"
+                    let channelDescription = format.channels == 2
+                        ? "stereo"
+                        : L10n.text("\(format.channels) kan.", "\(format.channels) ch.")
+                    let desc = "\(Int(format.sampleRate)) Hz · \(channelDescription) · 16-bit → \(host):\(port)"
                     self.server.send(Frame.audioFormat(sampleRate: UInt32(format.sampleRate), channels: UInt8(format.channels),
                                                        format: .int16, status: 0, message: ""))
                     self.emit(.audioStarted(desc))
-                    self.emit(.log("Audio: \(desc), bufor \(cfg.audioBufferFrames) ramek"))
+                    self.emit(.log(L10n.text("Audio: \(desc), bufor \(cfg.audioBufferFrames) ramek",
+                                             "Audio: \(desc), \(cfg.audioBufferFrames)-frame buffer")))
                     self.startStatsTimer()
                     self.sendStatus()
                 }
@@ -312,7 +333,7 @@ final class Engine {
                     guard let self, self.audioGeneration == generation else { return }
                     self.server.send(Frame.audioFormat(sampleRate: 0, channels: 0, format: .int16, status: 1, message: message))
                     self.emit(.audioError(message))
-                    self.emit(.log("Audio błąd: \(message)"))
+                    self.emit(.log(L10n.text("Błąd audio: \(message)", "Audio error: \(message)")))
                     self.sendStatus()
                 }
             }
@@ -321,8 +342,9 @@ final class Engine {
 
     private func restartAudio() {
         guard let req = audioRequest, tap != nil else { return }
-        emit(.log("Restart przechwytywania audio (zmiana urządzenia/ustawień)"))
-        startAudio(host: req.host, port: req.port)
+        emit(.log(L10n.text("Restart przechwytywania audio (zmiana urządzenia/ustawień)",
+                            "Restarting audio capture after an output or setting change")))
+        startAudio(host: req.host, port: req.port, key: req.key, sessionID: req.sessionID)
     }
 
     private func stopAudioLocked(notify: Bool) {
@@ -337,7 +359,7 @@ final class Engine {
             sender = nil
             if notify {
                 emit(.audioStopped)
-                emit(.log("Audio zatrzymane"))
+                emit(.log(L10n.text("Audio zatrzymane", "Audio stopped")))
                 sendStatus()
             }
         }

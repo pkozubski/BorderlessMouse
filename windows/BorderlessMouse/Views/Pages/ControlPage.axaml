@@ -24,6 +24,11 @@
                         <ComboBox ItemsSource="{Binding MacSides}" SelectedItem="{Binding SelectedMacSide}" MinWidth="150" />
                     </views:SettingRow>
                     <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Awaryjny skrót klawiszowy"
+                                      Subtitle="{Binding EmergencyHotkeyDescription}">
+                        <ComboBox ItemsSource="{Binding EmergencyHotkeys}" SelectedItem="{Binding SelectedEmergencyHotkey}" MinWidth="150" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
                     <views:SettingRow Title="Czułość myszy na Macu" Subtitle="{Binding RemoteMouseSpeedLabel}">
                         <Slider Minimum="0.25" Maximum="4" TickFrequency="0.25" IsSnapToTickEnabled="True"
                                 Value="{Binding RemoteMouseSpeed}" Width="190" />
@@ -34,7 +39,7 @@
                         <ToggleSwitch Classes="compact" IsChecked="{Binding HideCursorWhileRemote}" />
                     </views:SettingRow>
                     <Rectangle Classes="divider" />
-                    <views:SettingRow Title="Kursor" Subtitle="Scroll Lock przełącza sterowanie ręcznie w obie strony.">
+                    <views:SettingRow Title="Kursor" Subtitle="{Binding EmergencyHotkeyDescription}">
                         <TextBlock Text="{Binding CursorStatusText}" FontWeight="Medium" Foreground="{Binding CursorStatusBrush}" />
                     </views:SettingRow>
                 </StackPanel>
@@ -47,7 +52,7 @@
                         <TextBlock Text="DŹWIĘK" />
                     </StackPanel>
                     <views:SettingRow Title="Odbieraj dźwięk z Maca"
-                                      Subtitle="Cały dźwięk systemowy Maca gra na wybranym urządzeniu (UDP, PCM 16-bit).">
+                                      Subtitle="Cały dźwięk systemowy Maca gra na wybranym urządzeniu przez szyfrowany strumień LAN.">
                         <ToggleSwitch Classes="compact" IsChecked="{Binding AudioEnabled}" />
                     </views:SettingRow>
                     <Rectangle Classes="divider" />
@@ -83,7 +88,7 @@
                         <TextBlock Text="{Binding AudioStatusText}" FontSize="13" TextWrapping="Wrap" />
                     </StackPanel>
                     <ProgressBar Classes="level" Minimum="0" Maximum="1" Value="{Binding AudioLevel}" />
-                    <TextBlock Classes="subtitle" Text="{Binding AudioStatsText}" />
+                    <TextBlock Classes="subtitle mono" Text="{Binding AudioStatsText}" />
                 </StackPanel>
             </Border>
         

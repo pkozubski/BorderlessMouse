@@ -12,36 +12,21 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Import stable release certificate
-        if: github.event_name == 'push'
-        env:
-          MACOS_SIGNING_P12_BASE64: ${{ secrets.MACOS_SIGNING_P12_BASE64 }}
-          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
-        run: bash macos/ci/import-signing.sh
       - name: Build universal .app
         run: |
           xcodebuild -version
           cd macos
           # SDK 26+ jest wymagany, żeby na macOS 26 aplikacja miała nowy wygląd systemu
           REQUIRE_SDK_MAJOR=26 UNIVERSAL=1 VERSION=0.0.0 ./build.sh
-      - name: Verify signature continuity and update validation
-        if: github.event_name == 'push'
-        run: bash macos/tests/signature-check.sh
       - name: Verify clipboard protocol and PNG/TIFF synchronization
         run: bash macos/tests/clipboard-check.sh
+      - name: Verify pairing, key derivation and encrypted sessions
+        run: bash macos/tests/security-check.sh
       - uses: actions/upload-artifact@v4
         with:
           name: BorderlessMouse-macOS-ci
           path: macos/build/BorderlessMouse.app
           if-no-files-found: error
-      - name: Remove temporary signing identity
-        if: always() && github.event_name == 'push'
-        timeout-minutes: 1
-        run: |
-          # Zaufanie do publicznego certyfikatu znika wraz z jednorazowym runnerem.
-          security delete-keychain "$RUNNER_TEMP/borderlessmouse-signing.keychain-db" || true
-          rm -f "$RUNNER_TEMP/borderlessmouse-signing.p12"
-
   windows:
     name: Windows app (dotnet)
     runs-on: windows-latest
@@ -50,15 +35,17 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - name: Restore locked dependencies
+        run: dotnet restore windows/ClipboardChecks/BorderlessMouse.ClipboardChecks.csproj --locked-mode
       - name: Build
-        run: dotnet build windows/BorderlessMouse/BorderlessMouse.csproj -c Release -warnaserror
+        run: dotnet build windows/BorderlessMouse/BorderlessMouse.csproj -c Release -warnaserror --no-restore
       - name: Verify clipboard protocol, images and concurrent changes
-        run: dotnet run --project windows/ClipboardChecks/BorderlessMouse.ClipboardChecks.csproj -c Release
+        run: dotnet run --project windows/ClipboardChecks/BorderlessMouse.ClipboardChecks.csproj -c Release --no-restore
       - name: Publish (win-x64, single file)
         run: >
           dotnet publish windows/BorderlessMouse/BorderlessMouse.csproj -c Release -r win-x64
           --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -o publish
+          --no-restore -o publish
       - uses: actions/upload-artifact@v4
         with:
           name: BorderlessMouse-Windows-ci

@@ -4,6 +4,7 @@ using BorderlessMouse.Models;
 using BorderlessMouse.Net;
 using BorderlessMouse.Protocol;
 using static BorderlessMouse.Input.NativeMethods;
+using static BorderlessMouse.Localization.L10n;
 
 namespace BorderlessMouse.Input;
 
@@ -33,6 +34,8 @@ public sealed class InputCapture : IDisposable
 
     public bool Enabled { get; set; } = true;
     public MacSide Side { get; set; } = MacSide.Left;
+    /// <summary>Klawisz, który zawsze ręcznie oddaje lub przejmuje sterowanie.</summary>
+    public ushort EmergencyVirtualKey { get; set; } = VK_SCROLL;
     /// <summary>Ukrywaj kursor Windows podczas sterowania Makiem.</summary>
     public bool HideCursorWhileRemote { get; set; } = true;
     /// <summary>Mnożnik surowych delt myszy (Raw Input nie ma akceleracji Windows).</summary>
@@ -61,8 +64,8 @@ public sealed class InputCapture : IDisposable
         EnsureNativeWindow();
         var raw = _native?.RegisterRawMouse() == true;
         Dispatcher.UIThread.Post(() => Log?.Invoke(raw
-            ? "Hooki aktywne, ruch myszy z Raw Input (kursor zostaje przy krawędzi)"
-            : "Hooki aktywne, Raw Input niedostępny – tryb awaryjny z parkowaniem kursora"));
+            ? T("Hooki aktywne, ruch myszy z Raw Input (kursor zostaje przy krawędzi)", "Hooks active with Raw Input; the pointer remains at the edge")
+            : T("Hooki aktywne, Raw Input niedostępny – tryb awaryjny z parkowaniem kursora", "Hooks active; Raw Input unavailable, using pointer parking fallback")));
     }
 
     public void UninstallHooks()
@@ -73,7 +76,7 @@ public sealed class InputCapture : IDisposable
         _native?.UnregisterRawMouse();
         _keysDown.Clear();
         RestoreCursor();
-        Dispatcher.UIThread.Post(() => Log?.Invoke("Hooki klawiatury i myszy wyłączone"));
+        Dispatcher.UIThread.Post(() => Log?.Invoke(T("Hooki klawiatury i myszy wyłączone", "Keyboard and pointer hooks disabled")));
     }
 
     private void EnsureNativeWindow()
@@ -86,7 +89,7 @@ public sealed class InputCapture : IDisposable
         }
         catch (Exception ex)
         {
-            Dispatcher.UIThread.Post(() => Log?.Invoke("Okno Raw Input nie powstało: " + ex.Message));
+            Dispatcher.UIThread.Post(() => Log?.Invoke(T("Nie udało się uruchomić Raw Input: ", "Could not start Raw Input: ") + ex.Message));
         }
     }
 
@@ -106,7 +109,7 @@ public sealed class InputCapture : IDisposable
         Interlocked.Increment(ref _remoteMoves);
     }
 
-    /// <summary>Przełącza ręcznie (Scroll Lock).</summary>
+    /// <summary>Przełącza ręcznie wybranym klawiszem awaryjnym.</summary>
     public void Toggle()
     {
         if (IsRemote) ReturnToLocal(0.5f, sendRelease: true);
@@ -252,7 +255,9 @@ public sealed class InputCapture : IDisposable
             if (!IsRemote) return;
             RemoteChanged?.Invoke(true);
             if (HideCursorWhileRemote) HideCursor();
-            Log?.Invoke($"Kursor przeszedł na Maca (krawędź {Side}, ratio {ratio:0.00}, {(UsingRawInput ? "Raw Input" : "tryb awaryjny")})");
+            Log?.Invoke(T(
+                $"Kursor przeszedł na Maca (krawędź {Side}, pozycja {ratio:0.00}, {(UsingRawInput ? "Raw Input" : "tryb awaryjny")})",
+                $"Pointer moved to Mac (edge {Side}, position {ratio:0.00}, {(UsingRawInput ? "Raw Input" : "fallback")})"));
         });
     }
 
@@ -312,8 +317,8 @@ public sealed class InputCapture : IDisposable
             RemoteChanged?.Invoke(false);
             SetCursorPos(x, y);
             Log?.Invoke(rejected
-                ? "Mac natychmiast oddał sterowanie – sprawdź na Macu uprawnienie Dostępność (po każdym buildzie ad-hoc trzeba je nadać ponownie) i czy „Przyjmuj klawiaturę i mysz” jest włączone"
-                : $"Kursor wrócił na Windows (wysłano {moves} ruchów myszy)");
+                ? T("Mac natychmiast oddał sterowanie – sprawdź uprawnienie Dostępność i przełącznik przyjmowania klawiatury i myszy.", "Mac returned control immediately. Check Accessibility permission and the keyboard and mouse control toggle on the Mac.")
+                : T($"Kursor wrócił na Windows (wysłano {moves} ruchów myszy)", $"Pointer returned to Windows ({moves} pointer events sent)"));
         });
     }
 
@@ -327,7 +332,7 @@ public sealed class InputCapture : IDisposable
         var scan = (ushort)d.scanCode;
         var ext = (d.flags & LLKHF_EXTENDED) != 0;
 
-        if (vk == VK_SCROLL && Enabled && _client.IsConnected)
+        if (vk == EmergencyVirtualKey && Enabled && _client.IsConnected)
         {
             if (down) Toggle();
             return true;

@@ -14,6 +14,7 @@ jobs:
   macos:
     name: macOS (universal .app)
     runs-on: macos-26
+    environment: production-release
     steps:
       - uses: actions/checkout@v4
       - name: Import stable release certificate
@@ -29,9 +30,26 @@ jobs:
           REQUIRE_SDK_MAJOR=26 UNIVERSAL=1 VERSION="${GITHUB_REF_NAME#v}" BUILD_NUMBER="${GITHUB_RUN_NUMBER}" ./build.sh
           echo "Zlinkowane SDK:"
           otool -l build/BorderlessMouse.app/Contents/MacOS/BorderlessMouse | grep -A5 LC_BUILD_VERSION | grep -E "sdk|minos" || true
-          ditto -c -k --keepParent build/BorderlessMouse.app BorderlessMouse-macOS.zip
       - name: Verify signature continuity and update validation
         run: bash macos/tests/signature-check.sh
+      - name: Notarize and staple
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          : "${APPLE_ID:?Brak APPLE_ID}"
+          : "${APPLE_TEAM_ID:?Brak APPLE_TEAM_ID}"
+          : "${APPLE_APP_PASSWORD:?Brak APPLE_APP_PASSWORD}"
+          cd macos
+          ditto -c -k --keepParent build/BorderlessMouse.app notarization.zip
+          xcrun notarytool submit notarization.zip \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple build/BorderlessMouse.app
+          xcrun stapler validate build/BorderlessMouse.app
+          spctl --assess --type execute --verbose=2 build/BorderlessMouse.app
+          ditto -c -k --keepParent build/BorderlessMouse.app BorderlessMouse-macOS.zip
+          rm -f notarization.zip
       - uses: actions/upload-artifact@v4
         with:
           name: macos
@@ -48,23 +66,53 @@ jobs:
   windows:
     name: Windows (x64, single file)
     runs-on: windows-latest
+    environment: production-release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - name: Restore locked dependencies
+        run: dotnet restore windows/BorderlessMouse/BorderlessMouse.csproj -r win-x64 --locked-mode
       - name: Publish
         shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          dotnet publish windows/BorderlessMouse/BorderlessMouse.csproj -c Release -r win-x64 `
-            --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:Version=$version -p:InformationalVersion=$version -o publish
-          Move-Item publish/BorderlessMouse.exe publish/BorderlessMouse-Windows-x64.exe
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_BASE64)) { throw "Brak WINDOWS_SIGNING_PFX_BASE64" }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_PASSWORD)) { throw "Brak WINDOWS_SIGNING_PFX_PASSWORD" }
+          $pfx = Join-Path $env:RUNNER_TEMP "borderlessmouse-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
+            $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+              $pfx, $env:WINDOWS_SIGNING_PFX_PASSWORD,
+              [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+            $publisherSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData))
+            $version = "${{ github.ref_name }}".TrimStart("v")
+            dotnet publish windows/BorderlessMouse/BorderlessMouse.csproj -c Release -r win-x64 `
+              --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+              -p:Version=$version -p:InformationalVersion=$version `
+              -p:WindowsPublisherCertificateSha256=$publisherSha256 --no-restore -o publish
+            Move-Item publish/BorderlessMouse.exe publish/BorderlessMouse-Windows-x64.exe
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+              Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+            if (-not $signtool) { throw "Nie znaleziono signtool.exe" }
+            & $signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com `
+              /f $pfx /p $env:WINDOWS_SIGNING_PFX_PASSWORD publish/BorderlessMouse-Windows-x64.exe
+            if ($LASTEXITCODE -ne 0) { throw "Podpisywanie Windows nie powiodło się" }
+            & $signtool verify /pa /all /v publish/BorderlessMouse-Windows-x64.exe
+            if ($LASTEXITCODE -ne 0) { throw "Weryfikacja Authenticode nie powiodła się" }
+          }
+          finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: publish/BorderlessMouse-Windows-x64.exe
+          path: |
+            publish/BorderlessMouse-Windows-x64.exe
+            publish/THIRD_PARTY_NOTICES.txt
           if-no-files-found: error
 
   release:
@@ -79,7 +127,7 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          sha256sum BorderlessMouse-macOS.zip BorderlessMouse-Windows-x64.exe > SHA256SUMS.txt
+          sha256sum BorderlessMouse-macOS.zip BorderlessMouse-Windows-x64.exe THIRD_PARTY_NOTICES.txt > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - name: Create release
         env:
@@ -89,4 +137,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "BorderlessMouse $GITHUB_REF_NAME" \
             --generate-notes \
-            dist/BorderlessMouse-macOS.zip dist/BorderlessMouse-Windows-x64.exe dist/SHA256SUMS.txt
+            dist/BorderlessMouse-macOS.zip dist/BorderlessMouse-Windows-x64.exe \
+            dist/THIRD_PARTY_NOTICES.txt dist/SHA256SUMS.txt

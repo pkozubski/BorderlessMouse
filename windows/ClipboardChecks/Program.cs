@@ -11,6 +11,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using BorderlessMouse.Net;
 using BorderlessMouse.Protocol;
+using BorderlessMouse.Security;
 
 internal static class Program
 {
@@ -56,6 +57,7 @@ internal static class Program
 
     private static async Task RunChecks()
     {
+        RunSecurityChecks();
         using var fixture = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "clipboard.json")));
         string Field(string name) => fixture.RootElement.GetProperty(name).GetString()!;
         var png = Convert.FromBase64String(Field("pngBase64"));
@@ -175,6 +177,46 @@ internal static class Program
         Expect(await clipboard.Clipboard.TryGetTextAsync() == "disabled", "failed write preserves previous clipboard");
         Expect(await sync.ApplyAsync(image), "retry after write failure");
         Console.WriteLine("✓ Clipboard: shared wire fixtures, size limits, PNG/bitmap, transparency, no echo, locked clipboard and concurrent changes");
+    }
+
+    private static void RunSecurityChecks()
+    {
+        static byte[] Hex(string value) => Convert.FromHexString(value);
+        var secret = Enumerable.Range(0x00, 16).Select(i => (byte)i).ToArray();
+        var clientNonce = Enumerable.Range(0x10, 16).Select(i => (byte)i).ToArray();
+        var serverNonce = Enumerable.Range(0x20, 16).Select(i => (byte)i).ToArray();
+        var code = PairingCodeCodec.Encode(secret);
+        Expect(code == "AAAQE-AYEAU-DAOCA-JBIFQ-YDIOB-4", "stable Base32 pairing code");
+        Expect(PairingCodeCodec.TryDecode(code.ToLowerInvariant(), out var decoded) && decoded.SequenceEqual(secret), "pairing code round trip");
+        Expect(!PairingCodeCodec.TryDecode(code + "A", out _), "pairing code rejects extra Base32 data");
+        Expect(!PairingCodeCodec.TryDecode(code[..^1] + "B", out _), "pairing code rejects non-canonical padding");
+        Expect(!PairingCodeCodec.TryDecode("wrong", out _), "invalid pairing code");
+        Expect(ControlCrypto.Proof(secret, "server", clientNonce, serverNonce).SequenceEqual(
+            Hex("4a9dcee988ea2e21921ed8d4a594e0f3af0ceb3805283584d28ddae944cb688b")), "server proof vector");
+        Expect(ControlCrypto.Proof(secret, "client", clientNonce, serverNonce).SequenceEqual(
+            Hex("b7015ba17131df196b87fb0238e631f1813de80a7d2fcc6c2d326d28fb313b92")), "client proof vector");
+        var salt = clientNonce.Concat(serverNonce).ToArray();
+        Expect(ControlCrypto.Derive(secret, salt, "BorderlessMouse/v2/control/client-to-server").SequenceEqual(
+            Hex("fbf9a195b4321503c246bb0855572b6b496e49a292fff8fb8effa082db846191")), "HKDF vector");
+
+        var client = new SecureSession(secret, clientNonce, serverNonce, SecureSession.SessionRole.Client);
+        var server = new SecureSession(secret, clientNonce, serverNonce, SecureSession.SessionRole.Server);
+        Expect(client.AudioKey.SequenceEqual(Hex("4f266a9ca00dc725ad16bfc37c25804926196cb2d3f7a9f07a22996cd9e54aaa")), "audio key vector");
+        Expect(client.AudioSessionId == 0xE4D7B1D0FC6AACD5, "audio session id vector");
+        var ping = Frame.Ping(123456);
+        var envelope = client.Seal(ping)!;
+        Expect(server.Open(envelope)!.SequenceEqual(ping), "client-to-server authenticated encryption");
+        Expect(server.Open(envelope) is null, "control replay rejected");
+        var tampered = client.Seal(ping)!;
+        tampered[^1] ^= 1;
+        Expect(server.Open(tampered) is null, "tampered control frame rejected");
+        var status = Frame.Make(MessageType.Status, [(byte)(StatusFlags.AccessibilityGranted | StatusFlags.AudioCapturing)]);
+        Expect(client.Open(server.Seal(status)!)!.SequenceEqual(status), "server-to-client authenticated encryption");
+        Expect(Frame.TryParseSingle(status, out var type, out _) && type == MessageType.Status, "single inner frame parsing");
+        Expect(!Frame.TryParseSingle(status.Concat(new byte[] { 0 }).ToArray(), out _, out _), "trailing bytes rejected");
+        var impostor = new SecureSession(Enumerable.Repeat((byte)0xAA, 16).ToArray(), clientNonce, serverNonce, SecureSession.SessionRole.Client);
+        Expect(server.Open(impostor.Seal(ping)!) is null, "wrong pairing key rejected");
+        Console.WriteLine("✓ Security: pairing vectors, HKDF, AES-GCM, tamper and replay protection");
     }
 }
 

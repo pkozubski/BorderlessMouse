@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
+using static BorderlessMouse.Localization.L10n;
 
 namespace BorderlessMouse.Models;
 
@@ -53,20 +54,20 @@ public static class Autostart
     {
         get
         {
-            if (!IsSupported) return "Dostępne tylko na Windows.";
+            if (!IsSupported) return T("Dostępne tylko na Windows.", "Available only on Windows.");
             try
             {
                 var value = ReadValue();
-                if (string.IsNullOrEmpty(value)) return "Wyłączony.";
+                if (string.IsNullOrEmpty(value)) return T("Wyłączony.", "Disabled.");
                 var exe = ExecutablePath;
-                if (string.IsNullOrEmpty(exe)) return "Włączony (nie można ustalić ścieżki bieżącego pliku exe).";
+                if (string.IsNullOrEmpty(exe)) return T("Włączony (nie można ustalić ścieżki bieżącego pliku exe).", "Enabled (the current executable path is unavailable).");
                 return value.Contains(exe, StringComparison.OrdinalIgnoreCase)
-                    ? "Włączony (wpis w rejestrze, klucz Run użytkownika)."
-                    : "Włączony, ale wpis wskazuje inny plik – zostanie poprawiony przy następnej zmianie.";
+                    ? T("Włączony (wpis w rejestrze, klucz Run użytkownika).", "Enabled for the current Windows account.")
+                    : T("Włączony, ale wpis wskazuje inny plik – zostanie poprawiony przy następnej zmianie.", "Enabled, but points to another file; it will be repaired on the next change.");
             }
             catch (Exception ex)
             {
-                return "Nie można odczytać rejestru: " + ex.Message;
+                return T("Nie można odczytać rejestru: ", "Cannot read the registry: ") + ex.Message;
             }
         }
     }
@@ -76,15 +77,15 @@ public static class Autostart
     public static string SetEnabled(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true)
-                        ?? throw new InvalidOperationException("Nie można otworzyć klucza Run.");
+                        ?? throw new InvalidOperationException(T("Nie można otworzyć klucza Run.", "Cannot open the Run registry key."));
         if (enabled)
         {
-            var path = ExecutablePath ?? throw new InvalidOperationException("Nie można ustalić ścieżki pliku exe.");
+            var path = ExecutablePath ?? throw new InvalidOperationException(T("Nie można ustalić ścieżki pliku exe.", "Cannot determine the executable path."));
             key.SetValue(ValueName, CommandLine, RegistryValueKind.String);
-            return "Autostart włączony: " + path;
+            return T("Autostart włączony: ", "Launch at sign-in enabled: ") + path;
         }
         key.DeleteValue(ValueName, throwOnMissingValue: false);
-        return "Autostart wyłączony";
+        return T("Autostart wyłączony", "Launch at sign-in disabled");
     }
 
     /// <summary>Po aktualizacji lub przeniesieniu pliku uaktualnia wpis, jeśli wskazuje inną ścieżkę.</summary>

@@ -44,6 +44,7 @@ printf 'invalid certificate\n' > "$TEST_DIR/invalid.cer"
 security find-certificate -c 'Apple Root CA' -p /System/Library/Keychains/SystemRootCertificates.keychain \
   | /usr/bin/openssl x509 -outform DER -out "$TEST_DIR/other.cer"
 swiftc -parse-as-library -framework Security -framework CryptoKit \
+  BorderlessMouse/Sources/Localization/L10n.swift \
   BorderlessMouse/Sources/App/ReleaseSignature.swift tests/ReleaseSignatureChecks.swift \
   -o "$TEST_DIR/checks"
 "$TEST_DIR/checks" "$CERT" "$TEST_DIR" "$PWD/build/BorderlessMouse.app"

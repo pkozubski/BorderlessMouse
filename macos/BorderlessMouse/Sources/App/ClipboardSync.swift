@@ -50,7 +50,8 @@ final class ClipboardSync {
             case .png:
                 guard let bitmap = NSBitmapImageRep(data: content.data),
                       let tiff = bitmap.tiffRepresentation else {
-                    self.onError?("Nie udało się odczytać obrazu ze schowka Windowsa.")
+                    self.onError?(L10n.text("Nie udało się odczytać obrazu ze schowka Windowsa.",
+                                            "Could not read the image received from the Windows clipboard."))
                     return
                 }
                 item.setData(content.data, forType: .png)
@@ -58,7 +59,8 @@ final class ClipboardSync {
             }
             self.pasteboard.clearContents()
             guard self.pasteboard.writeObjects([item]) else {
-                self.onError?("Nie udało się zapisać schowka. Spróbuj skopiować ponownie.")
+                self.onError?(L10n.text("Nie udało się zapisać schowka. Spróbuj skopiować ponownie.",
+                                        "Could not update the clipboard. Copy the item again."))
                 return
             }
             self.lastChangeCount = self.pasteboard.changeCount
@@ -90,7 +92,8 @@ final class ClipboardSync {
         // Przeglądarki mogą kopiować obraz razem z URL-em; obraz ma pierwszeństwo.
         if let png = pasteboard.data(forType: .png) {
             guard let content = ClipboardContent(format: .png, data: png) else {
-                onError?("Nieobsługiwany obraz lub przekroczony limit 32 MiB / 64 megapikseli.")
+                onError?(L10n.text("Nieobsługiwany obraz lub przekroczony limit 32 MiB / 64 megapikseli.",
+                                   "Unsupported image or the 32 MiB / 64 megapixel limit was exceeded."))
                 return nil
             }
             return content
@@ -107,7 +110,8 @@ final class ClipboardSync {
                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
                   let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]),
                   let content = ClipboardContent(format: .png, data: png) else {
-                onError?("Nieobsługiwany obraz lub przekroczony limit 32 MiB / 64 megapikseli.")
+                onError?(L10n.text("Nieobsługiwany obraz lub przekroczony limit 32 MiB / 64 megapikseli.",
+                                   "Unsupported image or the 32 MiB / 64 megapixel limit was exceeded."))
                 return nil
             }
             return content

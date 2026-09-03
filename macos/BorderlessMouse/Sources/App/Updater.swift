@@ -11,6 +11,7 @@ final class Updater: ObservableObject {
     static let repo = "BorderlessMouse"
     static let assetName = "BorderlessMouse-macOS.zip"
     static let checksumsName = "SHA256SUMS.txt"
+    private static let maximumDownloadBytes = 300 * 1024 * 1024
 
     struct Release: Equatable {
         let version: String
@@ -51,7 +52,7 @@ final class Updater: ObservableObject {
         state = .checking
         do {
             guard let release = try await fetchLatest() else {
-                state = silent ? .idle : .failed("Brak wydań na GitHubie")
+                state = silent ? .idle : .failed(L10n.text("Brak wydań na GitHubie", "No releases found on GitHub"))
                 return
             }
             if Self.isNewer(release.version, than: Self.currentVersion) {
@@ -152,6 +153,9 @@ final class Updater: ObservableObject {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw UpdaterError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
+        if http.expectedContentLength > Self.maximumDownloadBytes {
+            throw UpdaterError.downloadTooLarge
+        }
         let total = Double(http.expectedContentLength)
         var received = 0
         var buffer = [UInt8]()
@@ -166,6 +170,7 @@ final class Updater: ObservableObject {
             if buffer.count >= 1 << 20 {
                 handle.write(Data(buffer))
                 received += buffer.count
+                if received > Self.maximumDownloadBytes { throw UpdaterError.downloadTooLarge }
                 buffer.removeAll(keepingCapacity: true)
                 if total > 0, Date().timeIntervalSince(lastReport) > 0.1 {
                     lastReport = Date()
@@ -173,7 +178,11 @@ final class Updater: ObservableObject {
                 }
             }
         }
-        if !buffer.isEmpty { handle.write(Data(buffer)); received += buffer.count }
+        if !buffer.isEmpty {
+            received += buffer.count
+            if received > Self.maximumDownloadBytes { throw UpdaterError.downloadTooLarge }
+            handle.write(Data(buffer))
+        }
         progress(1)
         return dest
     }
@@ -201,8 +210,15 @@ final class Updater: ObservableObject {
         while kill -0 "$PID" 2>/dev/null; do sleep 0.2; done
         OLD="$APP.old-$$"
         mv "$APP" "$OLD" || exit 1
-        if mv "$NEW" "$APP"; then rm -rf "$OLD"; else mv "$OLD" "$APP"; exit 1; fi
-        open -n "$APP"
+        if ! mv "$NEW" "$APP"; then mv "$OLD" "$APP"; exit 1; fi
+        if open -n "$APP"; then
+          rm -rf "$OLD"
+        else
+          rm -rf "$APP"
+          mv "$OLD" "$APP"
+          open -n "$APP"
+          exit 1
+        fi
         """
         let scriptURL = newApp.deletingLastPathComponent().appendingPathComponent("swap.sh")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -240,19 +256,21 @@ final class Updater: ObservableObject {
         case noAppInArchive
         case missingChecksum
         case checksumMismatch
+        case downloadTooLarge
         case adHocIdentity
         case notWritable(String)
         case tool(String, String)
 
         var errorDescription: String? {
             switch self {
-            case .http(let code): return "GitHub odpowiedział kodem \(code)"
-            case .malformed: return "Nieoczekiwana odpowiedź GitHuba"
-            case .noAppInArchive: return "W archiwum nie ma aplikacji"
-            case .missingChecksum: return "W wydaniu brakuje prawidłowej sumy SHA-256 dla aplikacji"
-            case .checksumMismatch: return "Suma SHA-256 pobranego pliku nie zgadza się z wydaniem"
-            case .adHocIdentity: return "Podpis ad-hoc nie zachowuje uprawnień. Zostaw pole certyfikatu puste, aby użyć stałego podpisu wydawcy."
-            case .notWritable(let path): return "Brak prawa zapisu do \(path) – przenieś aplikację np. do ~/Applications"
+            case .http(let code): return L10n.text("GitHub odpowiedział kodem \(code)", "GitHub returned status \(code)")
+            case .malformed: return L10n.text("Nieoczekiwana odpowiedź GitHuba", "Unexpected GitHub response")
+            case .noAppInArchive: return L10n.text("W archiwum nie ma aplikacji", "The archive does not contain the app")
+            case .missingChecksum: return L10n.text("W wydaniu brakuje prawidłowej sumy SHA-256 dla aplikacji", "The release has no valid SHA-256 checksum for the app")
+            case .checksumMismatch: return L10n.text("Suma SHA-256 pobranego pliku nie zgadza się z wydaniem", "The downloaded file does not match the release SHA-256 checksum")
+            case .downloadTooLarge: return L10n.text("Plik aktualizacji przekracza limit 300 MiB", "The update exceeds the 300 MiB limit")
+            case .adHocIdentity: return L10n.text("Podpis ad-hoc nie zachowuje uprawnień. Zostaw pole certyfikatu puste, aby użyć stałego podpisu wydawcy.", "An ad-hoc signature cannot preserve permissions. Leave the certificate field empty to use the publisher signature.")
+            case .notWritable(let path): return L10n.text("Brak prawa zapisu do \(path) – przenieś aplikację np. do ~/Applications", "Cannot write to \(path); move the app to a writable location such as ~/Applications")
             case .tool(let tool, let msg): return "\(tool): \(msg)"
             }
         }

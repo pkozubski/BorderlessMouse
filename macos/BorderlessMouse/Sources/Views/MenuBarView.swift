@@ -11,26 +11,26 @@ struct MenuBarView: View {
             Text("\(peer.name) · \(peer.address)")
         }
         Divider()
-        Toggle("Przyjmuj klawiaturę i mysz", isOn: $state.settings.inputEnabled)
-        Toggle("Udostępniaj dźwięk", isOn: $state.settings.audioEnabled)
-        Toggle("Wycisz Maca podczas streamu", isOn: $state.settings.muteLocalAudio)
-        Toggle("Synchronizuj schowek", isOn: $state.settings.clipboardSyncEnabled)
-        Toggle("Uruchamiaj przy logowaniu", isOn: $state.settings.launchAtLogin)
+        Toggle(LocalizedStringKey("Przyjmuj klawiaturę i mysz"), isOn: $state.settings.inputEnabled)
+        Toggle(LocalizedStringKey("Udostępniaj dźwięk"), isOn: $state.settings.audioEnabled)
+        Toggle(LocalizedStringKey("Wycisz Maca podczas streamu"), isOn: $state.settings.muteLocalAudio)
+        Toggle(LocalizedStringKey("Synchronizuj schowek"), isOn: $state.settings.clipboardSyncEnabled)
+        Toggle(LocalizedStringKey("Uruchamiaj przy logowaniu"), isOn: $state.settings.launchAtLogin)
         Divider()
-        Button("Otwórz okno BorderlessMouse") {
+        Button(LocalizedStringKey("Otwórz okno BorderlessMouse")) {
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
         if state.peer != nil {
-            Button("Rozłącz") { state.disconnectPeer() }
+            Button(LocalizedStringKey("Rozłącz")) { state.disconnectPeer() }
         }
-        Button("Sprawdź aktualizacje…") {
+        Button(LocalizedStringKey("Sprawdź aktualizacje…")) {
             state.checkForUpdates()
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
         Divider()
-        Button("Zakończ") { NSApp.terminate(nil) }
+        Button(LocalizedStringKey("Zakończ")) { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 }

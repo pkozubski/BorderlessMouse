@@ -5,6 +5,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using BorderlessMouse.Input;
 using BorderlessMouse.Protocol;
+using static BorderlessMouse.Localization.L10n;
 
 namespace BorderlessMouse.Net;
 
@@ -78,7 +79,7 @@ public sealed class ClipboardSync
         if (data.Formats.Contains(PngFormat) && await data.TryGetValueAsync(PngFormat) is { } png)
         {
             var content = ClipboardContent.Create(ClipboardFormat.Png, png);
-            if (content is null) Error?.Invoke("Nieobsługiwany obraz lub przekroczony limit 32 MiB / 64 megapikseli.");
+            if (content is null) Error?.Invoke(T("Nieobsługiwany obraz lub przekroczony limit 32 MiB / 64 megapikseli.", "Unsupported image or the 32 MiB / 64 megapixel limit was exceeded."));
             return content;
         }
         var bitmap = await data.TryGetBitmapAsync();
@@ -148,7 +149,7 @@ public sealed class ClipboardSync
         }
         catch (Exception)
         {
-            Error?.Invoke("Nie udało się zapisać schowka z Maca. Spróbuj skopiować ponownie.");
+            Error?.Invoke(T("Nie udało się zapisać schowka z Maca. Spróbuj skopiować ponownie.", "Could not write the Mac clipboard content. Copy it again."));
             return false;
         }
         finally

@@ -83,13 +83,18 @@ sed -e "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/$BUNDLE_ID/g" \
 printf 'APPL????' > "$OUT/Contents/PkgInfo"
 cp BorderlessMouse/Resources/AppIcon.icns BorderlessMouse/Resources/BorderlessMouse.entitlements "$OUT/Contents/Resources/"
 cp BorderlessMouse/Resources/ReleaseSigning.cer "$OUT/Contents/Resources/"
+cp ../THIRD_PARTY_NOTICES.md "$OUT/Contents/Resources/THIRD_PARTY_NOTICES.txt"
+for localization in BorderlessMouse/Resources/*.lproj; do
+  [ -d "$localization" ] && cp -R "$localization" "$OUT/Contents/Resources/"
+done
 
 echo "→ codesign ($SIGN_IDENTITY)"
-SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --entitlements BorderlessMouse/BorderlessMouse.entitlements)
+SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --options runtime --entitlements BorderlessMouse/BorderlessMouse.entitlements)
 if [ -n "${SIGN_KEYCHAIN:-}" ]; then SIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN"); fi
 if [ "${REQUIRE_STABLE_SIGNING:-0}" = "1" ]; then
   CERT_HASH=$(/usr/bin/openssl x509 -inform DER -in BorderlessMouse/Resources/ReleaseSigning.cer -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')
   SIGN_ARGS+=(--requirements "=designated => identifier \"$BUNDLE_ID\" and anchor H\"$CERT_HASH\"")
+  SIGN_ARGS+=(--timestamp)
 fi
 codesign "${SIGN_ARGS[@]}" "$OUT"
 codesign --verify --strict --deep --all-architectures "$OUT"

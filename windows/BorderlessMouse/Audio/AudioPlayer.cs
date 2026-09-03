@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using static BorderlessMouse.Localization.L10n;
 
 namespace BorderlessMouse.Audio;
 
@@ -21,7 +22,7 @@ public sealed class AudioPlayer : IDisposable
 
     public static IReadOnlyList<AudioDeviceInfo> EnumerateOutputDevices()
     {
-        var list = new List<AudioDeviceInfo> { new(null, "Domyślne urządzenie systemowe") };
+        var list = new List<AudioDeviceInfo> { new(null, T("Domyślne urządzenie systemowe", "Default system device")) };
         try
         {
             using var enumerator = new MMDeviceEnumerator();

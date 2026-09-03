@@ -9,9 +9,9 @@ struct SettingRow<Control: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(LocalizedStringKey(title))
                 if let subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    Text(LocalizedStringKey(subtitle)).font(.caption).foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: 8)
@@ -28,7 +28,7 @@ struct StatusPill: View {
         HStack(spacing: 6) {
             Circle().fill(color).frame(width: 8, height: 8)
                 .shadow(color: color.opacity(0.6), radius: 3)
-            Text(text).font(.callout.weight(.medium))
+            Text(LocalizedStringKey(text)).font(.callout.weight(.medium))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)

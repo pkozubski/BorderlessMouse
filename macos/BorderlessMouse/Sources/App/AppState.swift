@@ -36,9 +36,11 @@ final class AppState: ObservableObject {
     @Published private(set) var audioPackets: UInt64 = 0
     @Published private(set) var audioSendErrors: UInt64 = 0
     @Published private(set) var accessibilityGranted = false
-    @Published private(set) var clipboardStatus = "Brak synchronizacji w tej sesji"
+    @Published private(set) var clipboardStatus = L10n.text("Brak synchronizacji w tej sesji", "No synchronization in this session")
     @Published private(set) var loginItemStatus = LoginItem.statusDescription
     @Published var loginItemError: String?
+    @Published private(set) var pairingCode = PairingKeyStore.shared.displayCode
+    @Published private(set) var pairingStorageError = PairingKeyStore.shared.storageError
     @Published private(set) var log: [LogEntry] = []
 
     let engine: Engine
@@ -81,10 +83,10 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 switch state {
-                case .available(let r): self?.appendLog("Dostępna aktualizacja \(r.version) (\(r.tag))")
-                case .upToDate: self?.appendLog("Aktualizacje: masz najnowszą wersję \(Updater.currentVersion)")
-                case .failed(let msg): self?.appendLog("Aktualizacje: \(msg)")
-                case .installing: self?.appendLog("Aktualizacja pobrana, podmiana i restart…")
+                case .available(let r): self?.appendLog(L10n.text("Dostępna aktualizacja \(r.version) (\(r.tag))", "Update \(r.version) is available (\(r.tag))"))
+                case .upToDate: self?.appendLog(L10n.text("Aktualizacje: masz najnowszą wersję \(Updater.currentVersion)", "Updates: version \(Updater.currentVersion) is current"))
+                case .failed(let msg): self?.appendLog(L10n.text("Aktualizacje: \(msg)", "Updates: \(msg)"))
+                case .installing: self?.appendLog(L10n.text("Aktualizacja pobrana, podmiana i restart…", "Update downloaded; replacing and restarting…"))
                 default: break
                 }
             }
@@ -106,22 +108,23 @@ final class AppState: ObservableObject {
     }
 
     private func fillWithDemoData() {
+        settings.hasCompletedOnboarding = true
         isListening = true
-        peer = ControlServer.PeerInfo(name: "PC-BIURO", address: "192.168.1.42")
+        peer = ControlServer.PeerInfo(name: L10n.text("PC-BIURO", "PC-DESK"), address: "192.168.1.42")
         cursorOnMac = true
         accessibilityGranted = true
         audioStreaming = true
         audioDescription = "48000 Hz · stereo · 16-bit → 192.168.1.42:47802"
         audioLevel = 0.42
         audioPackets = 18_432
-        clipboardStatus = "Wysłano 128 zn. do Windowsa · 21:40:12"
+        clipboardStatus = L10n.text("Wysłano 128 zn. do Windowsa · 21:40:12", "Sent 128 characters to Windows · 21:40:12")
         loginItemStatus = LoginItem.statusDescription
         log = [
-            LogEntry(time: Date().addingTimeInterval(-95), text: "Nasłuchiwanie TCP na porcie 47800"),
-            LogEntry(time: Date().addingTimeInterval(-80), text: "Discovery UDP nasłuchuje na porcie 47801"),
-            LogEntry(time: Date().addingTimeInterval(-42), text: "Połączono: PC-BIURO (192.168.1.42)"),
-            LogEntry(time: Date().addingTimeInterval(-20), text: "Audio: 48000 Hz · stereo · 16-bit, bufor 256 ramek"),
-            LogEntry(time: Date().addingTimeInterval(-4), text: "Kursor przeszedł na Maca"),
+            LogEntry(time: Date().addingTimeInterval(-95), text: L10n.text("Nasłuchiwanie TCP na porcie 47800", "Listening on TCP port 47800")),
+            LogEntry(time: Date().addingTimeInterval(-80), text: L10n.text("Discovery UDP nasłuchuje na porcie 47801", "Discovery is listening on UDP port 47801")),
+            LogEntry(time: Date().addingTimeInterval(-42), text: L10n.text("Połączono: PC-BIURO (192.168.1.42)", "Connected: PC-DESK (192.168.1.42)")),
+            LogEntry(time: Date().addingTimeInterval(-20), text: L10n.text("Audio: 48000 Hz · stereo · 16-bit, bufor 256 ramek", "Audio: 48000 Hz · stereo · 16-bit, 256-frame buffer")),
+            LogEntry(time: Date().addingTimeInterval(-4), text: L10n.text("Kursor przeszedł na Maca", "Pointer moved to Mac")),
         ]
     }
 
@@ -133,8 +136,9 @@ final class AppState: ObservableObject {
             let mechanism = try LoginItem.setEnabled(enabled)
             loginItemError = nil
             appendLog(enabled
-                      ? "Autostart włączony (\(mechanism == .service ? "element logowania" : "LaunchAgent"))"
-                      : "Autostart wyłączony")
+                      ? L10n.text("Autostart włączony (\(mechanism == .service ? "element logowania" : "LaunchAgent"))",
+                                  "Launch at login enabled (\(mechanism == .service ? "login item" : "LaunchAgent"))")
+                      : L10n.text("Autostart wyłączony", "Launch at login disabled"))
         } catch {
             loginItemError = error.localizedDescription
             appendLog("Autostart: \(error.localizedDescription)")
@@ -151,11 +155,11 @@ final class AppState: ObservableObject {
     }
 
     var statusSummary: (text: String, color: Color) {
-        if !isListening { return ("Nie nasłuchuje", .red) }
+        if !isListening { return (L10n.text("Nie nasłuchuje", "Unavailable"), .red) }
         if let peer {
-            if cursorOnMac { return ("Sterowanie z \(peer.name)", .green) }
-            return ("Połączono z \(peer.name)", .green) }
-        return ("Czeka na Windows", .orange)
+            if cursorOnMac { return (L10n.text("Sterowanie z \(peer.name)", "Controlled by \(peer.name)"), .green) }
+            return (L10n.text("Połączono z \(peer.name)", "Connected to \(peer.name)"), .green) }
+        return (L10n.text("Czeka na Windows", "Waiting for Windows"), .orange)
     }
 
     // MARK: - Akcje
@@ -165,7 +169,9 @@ final class AppState: ObservableObject {
         if granted != accessibilityGranted {
             accessibilityGranted = granted
             engine.setAccessibilityGranted(granted)
-            appendLog(granted ? "Uprawnienie Dostępność nadane" : "Brak uprawnienia Dostępność")
+            appendLog(granted
+                      ? L10n.text("Uprawnienie Dostępność nadane", "Accessibility permission granted")
+                      : L10n.text("Brak uprawnienia Dostępność", "Accessibility permission missing"))
         }
     }
 
@@ -185,6 +191,30 @@ final class AppState: ObservableObject {
     func disconnectPeer() { engine.disconnectPeer() }
     func stopAudio() { engine.stopAudio() }
     func restartServer() { engine.restartServer() }
+
+    func copyPairingCode() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(pairingCode, forType: .string)
+        appendLog(L10n.text("Skopiowano kod parowania", "Pairing code copied"))
+    }
+
+    func regeneratePairingCode() {
+        let store = PairingKeyStore.shared
+        if let error = store.regenerate() {
+            pairingStorageError = error
+            appendLog("Kod parowania: \(error)")
+            return
+        }
+        pairingCode = store.displayCode
+        pairingStorageError = nil
+        engine.update(config: settings.engineConfig)
+        appendLog(L10n.text("Wygenerowano nowy kod parowania; poprzednie połączenia zostały unieważnione",
+                            "Generated a new pairing code; previous connections were revoked"))
+    }
+
+    func completeOnboarding() {
+        settings.hasCompletedOnboarding = true
+    }
 
     func shutdown() {
         permissionTimer?.invalidate()
@@ -229,9 +259,11 @@ final class AppState: ObservableObject {
             audioPackets = packets
             audioSendErrors = errors
         case let .clipboardSent(summary):
-            clipboardStatus = "Wysłano \(summary) do Windowsa · \(Self.timeFormatter.string(from: Date()))"
+            clipboardStatus = L10n.text("Wysłano \(summary) do Windowsa · \(Self.timeFormatter.string(from: Date()))",
+                                        "Sent \(summary) to Windows · \(Self.timeFormatter.string(from: Date()))")
         case let .clipboardReceived(summary):
-            clipboardStatus = "Odebrano \(summary) z Windowsa · \(Self.timeFormatter.string(from: Date()))"
+            clipboardStatus = L10n.text("Odebrano \(summary) z Windowsa · \(Self.timeFormatter.string(from: Date()))",
+                                        "Received \(summary) from Windows · \(Self.timeFormatter.string(from: Date()))")
         case let .clipboardError(message):
             clipboardStatus = message
         case let .log(text):

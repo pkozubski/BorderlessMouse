@@ -4,10 +4,12 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using BorderlessMouse.Security;
+using static BorderlessMouse.Localization.L10n;
 
 namespace BorderlessMouse.Net;
 
-public sealed record ReleaseInfo(string Version, string Tag, string Notes, string PageUrl, string AssetUrl, string? ChecksumsUrl);
+public sealed record ReleaseInfo(string Version, string Tag, string Notes, string PageUrl, string AssetUrl, string ChecksumsUrl);
 
 /// <summary>
 /// Auto-updater oparty o GitHub Releases: pobiera BorderlessMouse-Windows-x64.exe,
@@ -20,6 +22,7 @@ public sealed class Updater
     public const string Repo = "BorderlessMouse";
     public const string AssetName = "BorderlessMouse-Windows-x64.exe";
     public const string ChecksumsName = "SHA256SUMS.txt";
+    private const long MaximumDownloadBytes = 300L * 1024 * 1024;
 
     private static readonly HttpClient Http = CreateClient();
 
@@ -55,6 +58,10 @@ public sealed class Updater
         return false;
     }
 
+    private static string PublisherCertificateSha256 =>
+        Assembly.GetEntryAssembly()?.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "WindowsPublisherCertificateSha256")?.Value ?? "";
+
     /// <summary>Zwraca najnowsze wydanie z zasobem dla Windows albo null, gdy brak wydań.</summary>
     public async Task<ReleaseInfo?> CheckAsync(CancellationToken ct)
     {
@@ -75,25 +82,35 @@ public sealed class Updater
             if (name == ChecksumsName) checksums = url;
         }
         if (asset is null) return null;
+        if (checksums is null) throw new InvalidDataException(T("Wydanie nie zawiera wymaganego pliku SHA256SUMS.txt.", "The release does not include the required SHA256SUMS.txt file."));
         return new ReleaseInfo(tag.TrimStart('v'), tag, notes, page, asset, checksums);
     }
 
     /// <summary>Pobiera, weryfikuje i przygotowuje podmianę exe. Po powrocie należy zakończyć aplikację.</summary>
     public async Task DownloadAndInstallAsync(ReleaseInfo release, IProgress<double> progress, CancellationToken ct)
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Aktualizacja w miejscu działa tylko na Windows.");
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException(T("Aktualizacja w miejscu działa tylko na Windows.", "In-place updates are available only on Windows."));
         var target = Environment.ProcessPath;
         if (string.IsNullOrEmpty(target) || !target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Nie można ustalić ścieżki pliku exe.");
+            throw new InvalidOperationException(T("Nie można ustalić ścieżki pliku exe.", "Cannot determine the executable path."));
 
-        var dir = Path.Combine(Path.GetTempPath(), "BorderlessMouse-update");
+        var dir = Path.Combine(Path.GetTempPath(), "BorderlessMouse-update-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var newExe = Path.Combine(dir, "BorderlessMouse.new.exe");
+
+        var checksumsText = await Http.GetStringAsync(release.ChecksumsUrl, ct);
+        var checksumEntry = checksumsText.Split('\n')
+            .Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .FirstOrDefault(parts => parts.Length == 2 && parts[1].TrimStart('*') == AssetName);
+        if (checksumEntry is null || checksumEntry[0].Length != 64 || !checksumEntry[0].All(Uri.IsHexDigit))
+            throw new InvalidDataException(T("Wydanie nie zawiera prawidłowej sumy SHA-256 dla aplikacji Windows.", "The release does not contain a valid SHA-256 checksum for the Windows app."));
+        var expectedChecksum = checksumEntry[0].ToLowerInvariant();
 
         using (var response = await Http.GetAsync(release.AssetUrl, HttpCompletionOption.ResponseHeadersRead, ct))
         {
             response.EnsureSuccessStatusCode();
             var total = response.Content.Headers.ContentLength ?? -1L;
+            if (total > MaximumDownloadBytes) throw new InvalidDataException(T("Plik aktualizacji przekracza limit 300 MiB.", "The update exceeds the 300 MiB limit."));
             await using var src = await response.Content.ReadAsStreamAsync(ct);
             await using var dst = new FileStream(newExe, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
             var buffer = new byte[1 << 16];
@@ -103,23 +120,19 @@ public sealed class Updater
             {
                 await dst.WriteAsync(buffer.AsMemory(0, n), ct);
                 read += n;
+                if (read > MaximumDownloadBytes) throw new InvalidDataException(T("Plik aktualizacji przekracza limit 300 MiB.", "The update exceeds the 300 MiB limit."));
                 if (total > 0) progress.Report((double)read / total);
             }
         }
         progress.Report(1);
 
-        if (release.ChecksumsUrl is not null)
+        await using (var stream = File.OpenRead(newExe))
         {
-            var text = await Http.GetStringAsync(release.ChecksumsUrl, ct);
-            var line = text.Split('\n').FirstOrDefault(l => l.TrimEnd().EndsWith(AssetName, StringComparison.Ordinal));
-            if (line is not null)
-            {
-                var expected = line.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0].ToLowerInvariant();
-                await using var fs = File.OpenRead(newExe);
-                var actual = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct)).ToLowerInvariant();
-                if (actual != expected) throw new InvalidOperationException("Suma SHA-256 pobranego pliku nie zgadza się z wydaniem.");
-            }
+            var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
+            if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual), Convert.FromHexString(expectedChecksum)))
+                throw new InvalidOperationException(T("Suma SHA-256 pobranego pliku nie zgadza się z wydaniem.", "The downloaded file does not match the release SHA-256 checksum."));
         }
+        AuthenticodeVerifier.Verify(newExe, PublisherCertificateSha256);
 
         var script = Path.Combine(dir, "swap.cmd");
         File.WriteAllText(script, """
@@ -135,15 +148,28 @@ public sealed class Updater
                 timeout /t 1 /nobreak >nul
                 goto wait
             )
-            :retry
+            set "OLD=%TARGET%.previous"
+            del /q "%OLD%" >nul 2>&1
+            move /y "%TARGET%" "%OLD%" >nul 2>&1
+            if errorlevel 1 exit /b 1
+            :install
             move /y "%NEW%" "%TARGET%" >nul 2>&1
             if errorlevel 1 (
                 set /a tries+=1
-                if %tries% geq 30 exit /b 1
+                if %tries% geq 30 (
+                    move /y "%OLD%" "%TARGET%" >nul 2>&1
+                    exit /b 1
+                )
                 timeout /t 1 /nobreak >nul
-                goto retry
+                goto install
             )
             start "" "%TARGET%"
+            if errorlevel 1 (
+                del /q "%TARGET%" >nul 2>&1
+                move /y "%OLD%" "%TARGET%" >nul 2>&1
+                exit /b 1
+            )
+            del /q "%OLD%" >nul 2>&1
             del "%~f0"
             """);
         var psi = new ProcessStartInfo("cmd.exe")

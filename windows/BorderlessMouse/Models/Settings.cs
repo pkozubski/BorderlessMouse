@@ -12,6 +12,13 @@ public enum MacSide
     Bottom,
 }
 
+public enum EmergencyHotkey
+{
+    ScrollLock,
+    Pause,
+    F12,
+}
+
 public sealed class Settings
 {
     public string HostAddress { get; set; } = string.Empty;
@@ -22,6 +29,7 @@ public sealed class Settings
 
     public bool InputSharingEnabled { get; set; } = true;
     public MacSide MacSide { get; set; } = MacSide.Left;
+    public EmergencyHotkey EmergencyHotkey { get; set; } = EmergencyHotkey.ScrollLock;
     public bool HideCursorWhileRemote { get; set; } = true;
     public double RemoteMouseSpeed { get; set; } = 1.0;
 
@@ -35,6 +43,7 @@ public sealed class Settings
     public bool AutoCheckUpdates { get; set; } = true;
 
     public bool StartMinimized { get; set; } = true;
+    public bool HasCompletedOnboarding { get; set; }
 
     private static readonly JsonSerializerOptions Options = new()
     {

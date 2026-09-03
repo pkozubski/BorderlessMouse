@@ -10,6 +10,60 @@
         <StackPanel Classes="page">
             <TextBlock Classes="pageTitle" Text="Połączenie z Makiem" />
 
+            <Border Classes="card onboarding" IsVisible="{Binding !HasCompletedOnboarding}">
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                    <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource AccentGradient}">
+                        <ui:FontIcon Glyph="&#xE8D4;" FontFamily="{StaticResource IconFont}"
+                                     Foreground="White" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Grid.Column="1" Spacing="8">
+                        <TextBlock Text="Połącz swoje biurko w trzech krokach" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Classes="subtitle" Text="1. Uruchom aplikację na Macu.  2. Wpisz kod parowania poniżej.  3. Wybierz znalezionego Maca i połącz." />
+                        <Button Content="Rozumiem" Command="{Binding CompleteOnboardingCommand}"
+                                HorizontalAlignment="Left" Classes="accent" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE72E;" />
+                        <TextBlock Text="BEZPIECZNE PAROWANIE" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="8" IsVisible="{Binding !HasPairingKey}">
+                        <TextBlock Classes="subtitle"
+                                   Text="Przepisz kod widoczny w sekcji Połączenie na Macu. Kod nie jest zapisywany w zwykłych ustawieniach." />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <TextBox Grid.Column="0" Text="{Binding PairingCode}"
+                                     Watermark="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-X"
+                                     MaxLength="31"
+                                     FontFamily="Cascadia Mono, Consolas, monospace" />
+                            <Button Grid.Column="1" Content="Zapisz kod" Classes="accent"
+                                    Command="{Binding SavePairingCodeCommand}" />
+                        </Grid>
+                        <TextBlock Text="{Binding PairingStatusText}" Classes="subtitle"
+                                   Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                   IsVisible="{Binding PairingCodeInvalid}" />
+                    </StackPanel>
+
+                    <views:SettingRow Title="Ten komputer jest sparowany"
+                                      Subtitle="{Binding PairingStatusText}"
+                                      IsVisible="{Binding HasPairingKey}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Classes="pill">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Ellipse Width="8" Height="8" Fill="{StaticResource StatusGreen}" />
+                                    <TextBlock Text="Chronione" FontWeight="Medium" />
+                                </StackPanel>
+                            </Border>
+                            <Button Content="Usuń zaufanie" Command="{Binding ForgetPairingCommand}" />
+                        </StackPanel>
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+
             <Border Classes="card">
                 <StackPanel Spacing="12">
                     <StackPanel Classes="sectionHeader">
@@ -42,6 +96,7 @@
                                  IsEnabled="{Binding !IsConnected}" />
                         <Button Grid.Column="1" Classes="accent" MinWidth="110"
                                 Content="{Binding ConnectButtonText}"
+                                IsEnabled="{Binding HasPairingKey}"
                                 Command="{Binding ToggleConnectCommand}" />
                     </Grid>
 
@@ -66,7 +121,7 @@
                         </Border>
                     </views:SettingRow>
                     <Rectangle Classes="divider" />
-                    <views:SettingRow Title="Kursor" Subtitle="Scroll Lock przełącza sterowanie ręcznie w obie strony.">
+                    <views:SettingRow Title="Kursor" Subtitle="{Binding EmergencyHotkeyDescription}">
                         <TextBlock Text="{Binding CursorStatusText}" FontWeight="Medium" Foreground="{Binding CursorStatusBrush}" />
                     </views:SettingRow>
                 </StackPanel>

@@ -5,8 +5,8 @@
 [![CI](https://github.com/pkozubski/BorderlessMouse/actions/workflows/ci.yml/badge.svg)](https://github.com/pkozubski/BorderlessMouse/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/pkozubski/BorderlessMouse)](https://github.com/pkozubski/BorderlessMouse/releases/latest)
 
-Współdzielenie **klawiatury i myszy** oraz **dźwięku** między Windows a macOS po sieci
-lokalnej – bez sterowników, bez chmury, z minimalnym opóźnieniem.
+Współdzielenie **klawiatury i myszy**, **schowka** oraz **dźwięku** między Windows a macOS
+po sieci lokalnej – bez sterowników, konta i chmury, z uwierzytelnionym szyfrowaniem.
 
 Scenariusz, na który jest zbudowana ta wersja:
 
@@ -22,17 +22,20 @@ Scenariusz, na który jest zbudowana ta wersja:
 ```
 ┌──────────────── Windows ────────────────┐        ┌──────────────── macOS ─────────────────┐
 │ hooki WH_MOUSE_LL / WH_KEYBOARD_LL      │  TCP   │ NWListener :47800                      │
-│ → ramki protokołu → TcpClient (NODELAY) │ ─────▶ │ → CGEvent (mysz, klawiatura)           │
+│ → AES-256-GCM → TcpClient (NODELAY)     │ ─────▶ │ → CGEvent (mysz, klawiatura)           │
 │                                         │        │                                        │
-│ UDP :47802 → bufor jitter → WASAPI      │ ◀───── │ Core Audio process tap (14.2+) → UDP   │
-│ (NAudio, shared/exclusive)              │  UDP   │ PCM 16-bit, ~5 ms na pakiet             │
+│ UDP :47802 → AES-GCM → jitter → WASAPI  │ ◀───── │ Core Audio process tap (14.2+) → UDP   │
+│ (NAudio, shared/exclusive)              │  UDP   │ szyfrowany PCM 16-bit, ~5 ms/pakiet     │
 │                                         │        │                                        │
-│ broadcast "BLM1?" → lista Maców         │ ◀───── │ odpowiedź discovery :47801              │
+│ broadcast "BLM2?" → lista Maców         │ ◀───── │ odpowiedź discovery :47801              │
 │ schowek (GetClipboardSequenceNumber)    │ ◀────▶ │ schowek (NSPasteboard.changeCount)      │
 └─────────────────────────────────────────┘        └────────────────────────────────────────┘
 ```
 
-Szczegóły protokołu: [PROTOCOL.md](PROTOCOL.md).
+Połączenie wymaga kodu z Maca. Wzajemne uwierzytelnienie HMAC-SHA-256 tworzy dla każdej
+sesji osobne klucze sterowania i audio; licznik pakietów blokuje ich ponowne odtworzenie.
+Szczegóły: [PROTOCOL.md](PROTOCOL.md), [polityka bezpieczeństwa](SECURITY.md) i
+[informacja o prywatności](PRIVACY.md).
 
 ## Wymagania
 
@@ -51,10 +54,9 @@ Gotowe pliki są w [GitHub Releases](https://github.com/pkozubski/BorderlessMous
 * `BorderlessMouse-Windows-x64.exe` – pojedynczy plik, bez instalatora.
 * `SHA256SUMS.txt` – sumy kontrolne używane też przez updater.
 
-Od wersji 1.3.4 wydania macOS używają stałego certyfikatu projektu. Nie jest to certyfikat
-Apple Developer ID ani notaryzacja, więc przy pierwszym uruchomieniu nadal może być
-potrzebne **Otwórz** / **Otwórz mimo to** w ustawieniach macOS. Na Windowsie może pojawić
-się ostrzeżenie SmartScreen.
+Publiczne wydania komercyjne muszą być podpisane certyfikatem Apple Developer ID,
+notaryzowane i staplowane, a plik Windows podpisany Authenticode z zaufanym znacznikiem
+czasu. Workflow wydania zatrzymuje publikację, jeśli któregokolwiek poświadczenia brakuje.
 
 ## Autostart
 
@@ -77,7 +79,9 @@ autostart, wypisuje użyty mechanizm i przywraca poprzedni stan.
 
 ## Interfejs
 
-Obie aplikacje mają ten sam układ natywny dla swojego systemu: pasek boczny z sekcjami
+Przy pierwszym uruchomieniu obie aplikacje prowadzą przez parowanie i wymagane zgody.
+Interfejs automatycznie używa polskiego dla polskiego języka systemu, a angielskiego dla
+pozostałych. Obie aplikacje mają natywny dla swojego systemu pasek boczny z sekcjami
 (Połączenie, Uprawnienia – tylko Mac, Sterowanie, Ustawienia, Dziennik). Każda sekcja to
 jedna przewijana strona z grupami (np. Sterowanie: klawiatura i mysz, dźwięk, schowek;
 Ustawienia: ogólne, uruchamianie, aktualizacje). Wiersze to „tytuł + opis + kontrolka”.
@@ -109,14 +113,11 @@ Obie aplikacje sprawdzają najnowsze wydanie na GitHubie (5 s po starcie i co 6 
 wyłączyć w karcie **Aktualizacje**). Aktualizacja jest pobierana, weryfikowana sumą SHA-256 i
 instalowana jednym kliknięciem, po czym aplikacja uruchamia się ponownie.
 
-* **Windows**: nowy plik exe podmienia bieżący po zamknięciu aplikacji (skrypt `swap.cmd` w `%TEMP%`).
-* **macOS**: bundle jest podmieniany w miejscu. Od wersji **1.3.4** kolejne wydania mają
-  stały podpis, aby macOS zachowywał uprawnienia Dostępność i nagrywania dźwięku.
-  Przy pierwszym przejściu ze starego podpisu ad-hoc może być potrzebne ponowne nadanie
-  zgód — to jednorazowa zmiana tożsamości aplikacji. Updater sprawdza podpis wydawcy
-  i SHA-256 przed podmianą. Pole **Aktualizacje → Zaawansowane → własny certyfikat**
-  pozostaw puste, jeśli korzystasz z wydań z GitHuba. Dla lokalnych buildów możesz nadal
-  używać własnego certyfikatu; błąd podpisywania zatrzymuje aktualizację.
+* **Windows**: updater wymaga SHA-256 i prawidłowego Authenticode od przypiętego certyfikatu
+  wydawcy. Podmiana zachowuje poprzedni plik do chwili poprawnego restartu i cofa zmianę
+  po błędzie.
+* **macOS**: updater wymaga SHA-256 i podpisu zgodnego z publicznym certyfikatem wydawcy.
+  Bundle jest podmieniany dopiero po weryfikacji, z lokalną kopią do wycofania operacji.
 
 Nowe wydanie robi się jednym tagiem:
 
@@ -126,11 +127,9 @@ git tag v1.1.0 && git push --tags
 
 Workflow `.github/workflows/release.yml` buduje obie aplikacje, liczy sumy i publikuje release.
 
-Podpis macOS korzysta z `MACOS_SIGNING_P12_BASE64` i `MACOS_SIGNING_P12_PASSWORD` w GitHub
-Secrets. Publiczny certyfikat jest w `macos/BorderlessMouse/Resources/ReleaseSigning.cer`;
-klucz prywatny nie trafia do repozytorium ani artefaktów. Runner importuje klucz do
-tymczasowego pęku, a po pracy go usuwa. Brak certyfikatu przerywa wydanie zamiast wracać
-do ad-hoc. Certyfikatu nie należy regenerować dla kolejnych wersji.
+Konfiguracja podpisów, notaryzacji i bramek wydania jest opisana w
+[docs/RELEASE.md](docs/RELEASE.md). Klucze prywatne nie trafiają do repozytorium ani
+artefaktów i są dostępne tylko w chronionym środowisku `production-release`.
 
 CI i wydanie sprawdzają zgodność podpisu dwóch różnych buildów oraz odrzucanie
 uszkodzonych, niepodpisanych i podpisanych ad-hoc aktualizacji.
@@ -141,8 +140,8 @@ uszkodzonych, niepodpisanych i podpisanych ad-hoc aktualizacji.
 
 Zbudowana lokalnie aplikacja: `macos/build/BorderlessMouse.app` (po `./build.sh`).
 
-1. Uruchom aplikację. Nasłuchuje na TCP 47800 i odpowiada na discovery (UDP 47801).
-2. W karcie **Uprawnienia macOS** kliknij **Poproś** przy „Dostępność” i włącz
+1. Uruchom aplikację. Kreator pokaże kod parowania i stan gotowości Maca.
+2. W kreatorze lub karcie **Uprawnienia macOS** kliknij **Poproś** przy „Dostępność” i włącz
    BorderlessMouse w *Ustawienia systemowe → Prywatność i ochrona → Dostępność*.
 3. Przy pierwszym streamie audio macOS zapyta o **nagrywanie dźwięku systemowego** – zgódź się
    (*Prywatność i ochrona → Nagrywanie ekranu i dźwięku systemowego*).
@@ -155,14 +154,17 @@ Aplikacja ma też ikonę w pasku menu z szybkimi przełącznikami.
 
 1. Uruchom `BorderlessMouse.exe` (przy pierwszym starcie Zapora Windows zapyta o dostęp – zaznacz
    **Sieci prywatne**; bez tego nie dotrze dźwięk UDP).
-2. Mac pojawi się na liście **Znalezione Maki** – kliknij go (albo wpisz IP) i **Połącz**.
-3. Ustaw, po której stronie ekranu stoi Mac (domyślnie *po lewej*).
-4. Przesuń mysz przez tę krawędź – kursor przechodzi na Maca, a kursor Windows zostaje
+2. Przepisz kod parowania wyświetlony przez Maca. Jest chroniony przez DPAPI dla bieżącego
+   konta Windows i nie trafia do zwykłego pliku ustawień.
+3. Mac pojawi się na liście **Maki w sieci lokalnej** – wybierz go (albo wpisz IP) i **Połącz**.
+4. Ustaw, po której stronie ekranu stoi Mac (domyślnie *po lewej*) oraz wybierz skrót
+   awaryjny: **Scroll Lock**, **Pause/Break** albo **F12**.
+5. Przesuń mysz przez tę krawędź – kursor przechodzi na Maca, a kursor Windows zostaje
    (ukryty) w miejscu przekroczenia. Ruch myszy jest czytany przez Raw Input, więc nie ma
    akceleracji Windows; tempo dostroisz suwakiem „Czułość myszy na Macu”. Powrót: przesuń
-   kursor przez przeciwną krawędź Maca albo naciśnij **Scroll Lock** (działa w obie strony).
-5. Dźwięk: włączony domyślnie; wybierz urządzenie wyjściowe i ewentualnie zmniejsz bufor.
-6. Schowek: włączony domyślnie po obu stronach (karta **Schowek**); synchronizowany jest
+   kursor przez przeciwną krawędź Maca albo naciśnij wybrany skrót (działa w obie strony).
+6. Dźwięk: włączony domyślnie; wybierz urządzenie wyjściowe i ewentualnie zmniejsz bufor.
+7. Schowek: włączony domyślnie po obu stronach; synchronizowany jest
    tekst do 1 MiB oraz zdjęcia i zrzuty ekranu do 32 MiB w PNG (maks. 64 × 1024² pikseli).
    Użyj „Kopiuj obraz” w przeglądarce/edytorze lub skopiuj zrzut ekranu do schowka,
    a następnie wklej go w aplikacji obsługującej obrazy na drugim komputerze.
@@ -180,14 +182,14 @@ przed przypadkowym oddaniem sterowania podczas grania, również gdy gra nie zat
 systemowego kursora na środku ekranu. Dotyczy to także innych aplikacji pełnoekranowych.
 
 Po **Alt+Tab** do zwykłego okna lub na pulpit przełączanie krawędzią wraca, gdy aplikacja
-zwolni mysz. **Scroll Lock** nadal przełącza ręcznie w obie strony, także podczas gry.
+zwolni mysz. Wybrany skrót awaryjny nadal przełącza ręcznie w obie strony, także podczas gry.
 Dźwięk i schowek działają przez cały czas.
 
 ## Opóźnienie i wydajność
 
-* **Wejście**: TCP z `TCP_NODELAY`, ramki 4–7 bajtów, zero buforowania po stronie Maca
-  (zdarzenia lecą prosto do `CGEvent.post`). RTT po LAN < 1 ms.
-* **Audio**: brak kodeka (PCM 16-bit, 1,5 Mb/s przy 48 kHz stereo), pakiety co ~5 ms,
+* **Wejście**: TCP z `TCP_NODELAY`; ramki sterowania są chronione AES-256-GCM i trafiają
+  bezpośrednio do `CGEvent.post` po weryfikacji integralności i licznika sesji.
+* **Audio**: AES-256-GCM, bez kodeka (PCM 16-bit, 1,5 Mb/s przy 48 kHz stereo), pakiety co ~5 ms,
   bufor jitter domyślnie 20 ms, WASAPI shared 15 ms (exclusive: 5 ms). Realne opóźnienie
   end-to-end zwykle 30–45 ms. Na kablu można zejść z buforem do 5–10 ms.
 * Mac przechwytuje dźwięk przez **Core Audio process tap** – bez BlackHole/Soundflower;
@@ -247,6 +249,8 @@ macos/
   project.yml                – XcodeGen
   BorderlessMouse/Sources/
     App/        Engine (logika), AppState (UI), Settings, ClipboardSync, Updater, LoginItem, UIPreview
+    Security/   kod parowania, Keychain, HMAC/HKDF, bezpieczna sesja AES-GCM
+    Localization/ polski i angielski interfejs
     Network/    ControlServer (TCP), DiscoveryResponder (UDP), AudioSender (UDP)
     Input/      InputInjector (CGEvent), KeyMap (scancode → kVK)
     Audio/      SystemAudioTap (Core Audio process tap)
@@ -257,6 +261,8 @@ windows/
   BorderlessMouse/
     Input/      NativeMethods, LowLevelHooks, NativeInputWindow (Raw Input + hider), InputCapture
     Models/     Settings, Autostart (klucz Run w rejestrze)
+    Security/   kod parowania, DPAPI, HMAC/HKDF, AES-GCM, weryfikacja Authenticode
+    Localization/ polski i angielski interfejs
     Net/        ControlClient (TCP), Discovery (UDP), AudioReceiver (UDP), ClipboardSync, Updater
     Audio/      JitterBufferProvider, AudioPlayer (NAudio/WASAPI)
     Views/      MainWindow.axaml (NavigationView w AppWindow z Mica), Pages/ (strony), SettingRow
@@ -269,6 +275,8 @@ windows/
 * [FluentAvalonia](https://github.com/amwx/FluentAvalonia) (MIT) – style i kontrolki WinUI 3 (Fluent Design v2, Mica, kolor akcentu systemu)
 * [NAudio](https://github.com/naudio/NAudio) (MIT) – WASAPI
 * [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) (MIT)
+* [Inter](https://github.com/rsms/inter) (SIL OFL 1.1) – krój pisma interfejsu Windows
+* ANGLE (licencja BSD) oraz SkiaSharp/HarfBuzzSharp (MIT) – natywne renderowanie Avalonia
 * Mechanika przełączania krawędzią i hooków wzorowana na Synergy/Barrier/Deskflow (GPL – kod nie jest kopiowany).
 
 ## Znane ograniczenia / co dalej
@@ -278,4 +286,13 @@ windows/
 * Kierunek tylko Windows → Mac (wejście) i Mac → Windows (dźwięk); protokół jest gotowy na
   rozszerzenie o kierunek odwrotny.
 * Caps Lock jest przekazywany jako zwykły klawisz – macOS może go ignorować.
-* Audio bez szyfrowania i bez kompresji – zaprojektowane pod zaufaną sieć LAN.
+* Audio jest szyfrowane, ale nieskompresowane; przy 48 kHz stereo zużywa około 1,5 Mb/s.
+* Protokół v2 nie łączy się ze starszymi buildami korzystającymi z protokołu v1.
+
+## Komercyjne wydanie
+
+Kod aplikacji jest objęty zastrzeżoną licencją [LICENSE](LICENSE). Przed płatną betą należy
+uzupełnić dane sprzedawcy i jurysdykcję w [szkicu EULA](docs/EULA-DRAFT.md), skonfigurować
+podpisy według [runbooka wydania](docs/RELEASE.md) i wykonać scenariusze z
+[planu płatnej bety](docs/BETA-PLAN.md). Licencje zależności są zebrane w
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

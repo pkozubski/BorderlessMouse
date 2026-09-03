@@ -7,14 +7,21 @@ using BorderlessMouse.Input;
 using BorderlessMouse.Models;
 using BorderlessMouse.Net;
 using BorderlessMouse.Protocol;
+using BorderlessMouse.Security;
 using BorderlessMouse.Views;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NAudio.Wave;
+using static BorderlessMouse.Localization.L10n;
 
 namespace BorderlessMouse.ViewModels;
 
 public sealed record MacSideOption(MacSide Value, string Label)
+{
+    public override string ToString() => Label;
+}
+
+public sealed record EmergencyHotkeyOption(EmergencyHotkey Value, ushort VirtualKey, string Label)
 {
     public override string ToString() => Label;
 }
@@ -51,10 +58,16 @@ public partial class MainViewModel : ObservableObject
 
         MacSides = new[]
         {
-            new MacSideOption(MacSide.Left, "Po lewej"),
-            new MacSideOption(MacSide.Right, "Po prawej"),
-            new MacSideOption(MacSide.Top, "U góry"),
-            new MacSideOption(MacSide.Bottom, "Na dole"),
+            new MacSideOption(MacSide.Left, T("Po lewej", "Left")),
+            new MacSideOption(MacSide.Right, T("Po prawej", "Right")),
+            new MacSideOption(MacSide.Top, T("U góry", "Above")),
+            new MacSideOption(MacSide.Bottom, T("Na dole", "Below")),
+        };
+        EmergencyHotkeys = new[]
+        {
+            new EmergencyHotkeyOption(EmergencyHotkey.ScrollLock, NativeMethods.VK_SCROLL, "Scroll Lock"),
+            new EmergencyHotkeyOption(EmergencyHotkey.Pause, NativeMethods.VK_PAUSE, "Pause / Break"),
+            new EmergencyHotkeyOption(EmergencyHotkey.F12, NativeMethods.VK_F12, "F12"),
         };
 
         _hostAddress = _settings.HostAddress;
@@ -64,6 +77,8 @@ public partial class MainViewModel : ObservableObject
         _autoConnect = _settings.AutoConnect;
         _inputSharingEnabled = _settings.InputSharingEnabled;
         _selectedMacSide = MacSides.First(o => o.Value == _settings.MacSide);
+        _selectedEmergencyHotkey = EmergencyHotkeys.FirstOrDefault(o => o.Value == _settings.EmergencyHotkey)
+                                   ?? EmergencyHotkeys[0];
         _hideCursorWhileRemote = _settings.HideCursorWhileRemote;
         _remoteMouseSpeed = _settings.RemoteMouseSpeed;
         _audioEnabled = _settings.AudioEnabled;
@@ -72,6 +87,11 @@ public partial class MainViewModel : ObservableObject
         _clipboardSyncEnabled = _settings.ClipboardSyncEnabled;
         _autoCheckUpdates = _settings.AutoCheckUpdates;
         _startMinimized = _settings.StartMinimized;
+        _hasCompletedOnboarding = _settings.HasCompletedOnboarding;
+        _hasPairingKey = PairingKeyStore.Load() is not null;
+        _pairingStatusText = _hasPairingKey
+            ? T("Kod zapisany bezpiecznie dla tego konta Windows.", "The code is protected for this Windows account.")
+            : T("Wpisz kod wyświetlany w aplikacji na Macu.", "Enter the code shown in the Mac app.");
         // stan autostartu bierzemy z systemu – rejestr jest źródłem prawdy
         _launchAtLogin = Autostart.IsEnabled;
         _autostartStatus = Autostart.StatusDescription;
@@ -96,6 +116,7 @@ public partial class MainViewModel : ObservableObject
     // ------------------------------------------------------------------
 
     public IReadOnlyList<MacSideOption> MacSides { get; }
+    public IReadOnlyList<EmergencyHotkeyOption> EmergencyHotkeys { get; }
     public ObservableCollection<AudioDeviceInfo> AudioDevices { get; } = new();
     public ObservableCollection<DiscoveredPeer> DiscoveredPeers { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
@@ -107,6 +128,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _autoConnect;
     [ObservableProperty] private bool _inputSharingEnabled;
     [ObservableProperty] private MacSideOption _selectedMacSide;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(EmergencyHotkeyDescription))] private EmergencyHotkeyOption _selectedEmergencyHotkey;
     [ObservableProperty] private bool _hideCursorWhileRemote;
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(RemoteMouseSpeedLabel))] private double _remoteMouseSpeed;
     [ObservableProperty] private bool _audioEnabled;
@@ -117,6 +139,11 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _autoCheckUpdates;
     [ObservableProperty] private bool _launchAtLogin;
     [ObservableProperty] private bool _startMinimized;
+    [ObservableProperty] private bool _hasCompletedOnboarding;
+    [ObservableProperty] private string _pairingCode = "";
+    [ObservableProperty] private bool _hasPairingKey;
+    [ObservableProperty] private bool _pairingCodeInvalid;
+    [ObservableProperty] private string _pairingStatusText = "";
     [ObservableProperty] private string _autostartStatus = "";
     [ObservableProperty] private DiscoveredPeer? _selectedPeer;
 
@@ -126,37 +153,40 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(ConnectButtonText))] private bool _isConnected;
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(ConnectButtonText))] private bool _isConnecting;
-    [ObservableProperty] private string _statusText = "Rozłączono";
+    [ObservableProperty] private string _statusText = T("Rozłączono", "Disconnected");
     [ObservableProperty] private IBrush _statusBrush = Gray;
-    [ObservableProperty] private string _connectionInfo = "Nie połączono.";
+    [ObservableProperty] private string _connectionInfo = T("Nie połączono.", "Not connected.");
     [ObservableProperty] private string _macStatusText = "";
     [ObservableProperty] private string _peerName = "";
     [ObservableProperty] private double _rttMs;
     [ObservableProperty] private bool _cursorOnMac;
-    [ObservableProperty] private string _cursorStatusText = "Na tym komputerze";
+    [ObservableProperty] private string _cursorStatusText = T("Na tym komputerze", "On this PC");
     [ObservableProperty] private IBrush _cursorStatusBrush = Gray;
     [ObservableProperty] private bool _audioActive;
-    [ObservableProperty] private string _audioStatusText = "Nieaktywne";
+    [ObservableProperty] private string _audioStatusText = T("Nieaktywne", "Inactive");
     [ObservableProperty] private IBrush _audioStatusBrush = Gray;
     [ObservableProperty] private float _audioLevel;
     [ObservableProperty] private string _audioStatsText = "";
     [ObservableProperty] private bool _hasDiscoveredPeers;
-    [ObservableProperty] private string _clipboardStatusText = "Brak synchronizacji w tej sesji";
+    [ObservableProperty] private string _clipboardStatusText = T("Brak synchronizacji w tej sesji", "No synchronization in this session");
     [ObservableProperty] private bool _macAccessibilityMissing;
 
     // aktualizacje
     [ObservableProperty] private bool _updateAvailable;
     [ObservableProperty] private string _updateMessage = "";
-    [ObservableProperty] private string _updateStatusText = "Kliknij „Sprawdź teraz”, aby sprawdzić nowe wydania na GitHubie.";
+    [ObservableProperty] private string _updateStatusText = T("Kliknij „Sprawdź teraz”, aby sprawdzić nowe wydania na GitHubie.", "Select Check now to look for a new release.");
     [ObservableProperty] private bool _isCheckingUpdates;
     [ObservableProperty] private bool _isInstallingUpdate;
     [ObservableProperty] private double _updateProgress;
 
-    public string VersionLabel => $"Wersja {Updater.CurrentVersion}";
+    public string VersionLabel => T($"Wersja {Updater.CurrentVersion}", $"Version {Updater.CurrentVersion}");
 
-    public string ConnectButtonText => IsConnected || IsConnecting ? "Rozłącz" : "Połącz";
-    public string RemoteMouseSpeedLabel => $"{RemoteMouseSpeed:0.00}× – Raw Input nie ma akceleracji Windows, więc dostrój tempo kursora na Macu.";
-    public string JitterBufferLabel => $"{(int)JitterBufferMs} ms – mniej = niższe opóźnienie, więcej = odporność na zakłócenia.";
+    public string ConnectButtonText => IsConnected || IsConnecting ? T("Rozłącz", "Disconnect") : T("Połącz", "Connect");
+    public string RemoteMouseSpeedLabel => T($"{RemoteMouseSpeed:0.00}× – Raw Input nie ma akceleracji Windows, więc dostrój tempo kursora na Macu.", $"{RemoteMouseSpeed:0.00}× — adjust the Mac pointer speed because Raw Input has no Windows acceleration.");
+    public string JitterBufferLabel => T($"{(int)JitterBufferMs} ms – mniej = niższe opóźnienie, więcej = odporność na zakłócenia.", $"{(int)JitterBufferMs} ms — lower for latency, higher for resilience.");
+    public string EmergencyHotkeyDescription => T(
+        $"{SelectedEmergencyHotkey.Label} zawsze przełącza sterowanie ręcznie w obie strony.",
+        $"{SelectedEmergencyHotkey.Label} always switches control manually in either direction.");
 
     private static void Post(Action action) => Dispatcher.UIThread.Post(action);
 
@@ -173,44 +203,47 @@ public partial class MainViewModel : ObservableObject
         _loading = true;
         AutoConnect = false;
         _loading = false;
-        Log("Tryb podglądu – sieć wyłączona");
+        Log(T("Tryb podglądu – sieć wyłączona", "Preview mode — network disabled"));
         IsConnected = true;
-        PeerName = "MacBook Air (Paweł)";
-        DiscoveredPeers.Add(new DiscoveredPeer("MacBook Air (Paweł)", "192.168.1.42", 47800));
+        HasPairingKey = true;
+        PairingStatusText = T("Kod jest chroniony dla tego konta Windows.", "The code is protected for this Windows account.");
+        HasCompletedOnboarding = true;
+        PeerName = "MacBook Air";
+        DiscoveredPeers.Add(new DiscoveredPeer("MacBook Air", "192.168.1.42", 47800));
         HasDiscoveredPeers = true;
         HostAddress = "192.168.1.42";
-        MacStatusText = "Mac: uprawnienie Dostępność OK · przechwytuje dźwięk";
+        MacStatusText = T("Mac: uprawnienie Dostępność OK · przechwytuje dźwięk", "Mac: Accessibility ready · audio capture active");
         CursorOnMac = true;
         AudioActive = true;
-        AudioStatusText = "48000 Hz · stereo · Słuchawki (USB) · WASAPI shared · 15 ms";
+        AudioStatusText = T("48000 Hz · stereo · Słuchawki (USB) · WASAPI shared · 15 ms", "48000 Hz · stereo · Headphones (USB) · WASAPI shared · 15 ms");
         AudioStatusBrush = Green;
         AudioLevel = 0.42f;
-        AudioStatsText = "bufor 21 ms · pakiety 18432 · utracone 0 · underruns 0 · przycięcia 0";
-        ClipboardStatusText = "Odebrano 128 zn. z Maca · 21:40:12";
-        UpdateStatusText = $"Masz najnowszą wersję · sprawdzono {DateTime.Now:HH:mm}";
-        ConnectionInfo = "Połączono z MacBook Air (Paweł) · 192.168.1.42:47800 · ping 0,4 ms";
-        StatusText = "Sterujesz Makiem";
+        AudioStatsText = T("bufor 21 ms · pakiety 18432 · utracone 0 · odrzucone 0 · niedopełnienia 0 · przepełnienia 0", "buffer 21 ms · packets 18432 · lost 0 · rejected 0 · underruns 0 · overruns 0");
+        ClipboardStatusText = T("Odebrano 128 zn. z Maca · 21:40:12", "Received 128 characters from Mac · 21:40:12");
+        UpdateStatusText = T($"Masz najnowszą wersję · sprawdzono {DateTime.Now:HH:mm}", $"Up to date · checked {DateTime.Now:HH:mm}");
+        ConnectionInfo = T("Połączono z MacBook Air · 192.168.1.42:47800 · ping 0,4 ms", "Connected to MacBook Air · 192.168.1.42:47800 · ping 0.4 ms");
+        StatusText = T("Sterujesz Makiem", "Controlling Mac");
         StatusBrush = Green;
-        CursorStatusText = "Na Macu · wysłane ruchy: 1 284";
+        CursorStatusText = T("Na Macu · wysłane ruchy: 1 284", "On Mac · pointer events: 1,284");
         CursorStatusBrush = Green;
-        Log("Połączono z MacBook Air (Paweł) (192.168.1.42)");
-        Log("Hooki aktywne, ruch myszy z Raw Input (kursor zostaje przy krawędzi)");
-        Log("Audio gra: 48000 Hz · stereo · WASAPI shared · 15 ms");
+        Log(T("Połączono z MacBook Air (192.168.1.42)", "Connected to MacBook Air (192.168.1.42)"));
+        Log(T("Hooki aktywne, ruch myszy z Raw Input (kursor zostaje przy krawędzi)", "Hooks active with Raw Input; the pointer remains at the edge"));
+        Log(T("Audio gra: 48000 Hz · stereo · WASAPI shared · 15 ms", "Audio playing: 48000 Hz · stereo · WASAPI shared · 15 ms"));
     }
 
     public void Start()
     {
-        Log("Start aplikacji");
+        Log(T("Start aplikacji", "Application started"));
         try
         {
             _discovery.Start();
         }
         catch (Exception ex)
         {
-            Log("Discovery nie wystartowało: " + ex.Message);
+            Log(T("Nie udało się uruchomić wykrywania: ", "Discovery could not start: ") + ex.Message);
         }
         _statsTimer.Start();
-        if (AutoConnect && !string.IsNullOrWhiteSpace(HostAddress))
+        if (AutoConnect && HasPairingKey && !string.IsNullOrWhiteSpace(HostAddress))
         {
             BeginConnect();
         }
@@ -240,30 +273,30 @@ public partial class MainViewModel : ObservableObject
     {
         if (IsCheckingUpdates || IsInstallingUpdate) return;
         IsCheckingUpdates = true;
-        UpdateStatusText = "Sprawdzanie…";
+        UpdateStatusText = T("Sprawdzanie…", "Checking…");
         try
         {
             var release = await _updater.CheckAsync(CancellationToken.None);
             if (release is null)
             {
-                UpdateStatusText = "Brak wydań na GitHubie.";
+                UpdateStatusText = T("Brak wydań na GitHubie.", "No releases found.");
             }
             else if (Updater.IsNewer(release.Version, Updater.CurrentVersion))
             {
                 _pendingRelease = release;
                 UpdateAvailable = true;
-                UpdateMessage = $"Wersja {release.Version} jest gotowa do pobrania (masz {Updater.CurrentVersion}).";
-                UpdateStatusText = $"Dostępna wersja {release.Version} · {release.PageUrl}";
-                Log($"Dostępna aktualizacja {release.Version}");
+                UpdateMessage = T($"Wersja {release.Version} jest gotowa do pobrania (masz {Updater.CurrentVersion}).", $"Version {release.Version} is ready to download (current {Updater.CurrentVersion}).");
+                UpdateStatusText = T($"Dostępna wersja {release.Version} · {release.PageUrl}", $"Version {release.Version} available · {release.PageUrl}");
+                Log(T($"Dostępna aktualizacja {release.Version}", $"Update {release.Version} is available"));
             }
             else
             {
-                UpdateStatusText = $"Masz najnowszą wersję · sprawdzono {DateTime.Now:HH:mm}";
+                UpdateStatusText = T($"Masz najnowszą wersję · sprawdzono {DateTime.Now:HH:mm}", $"Up to date · checked {DateTime.Now:HH:mm}");
             }
         }
         catch (Exception ex)
         {
-            UpdateStatusText = silent ? UpdateStatusText : "Nie udało się sprawdzić: " + ex.Message;
+            UpdateStatusText = silent ? UpdateStatusText : T("Nie udało się sprawdzić: ", "Check failed: ") + ex.Message;
             if (!silent) Log("Aktualizacje: " + ex.Message);
         }
         finally
@@ -278,19 +311,19 @@ public partial class MainViewModel : ObservableObject
         if (_pendingRelease is null || IsInstallingUpdate) return;
         IsInstallingUpdate = true;
         UpdateProgress = 0;
-        UpdateStatusText = "Pobieranie aktualizacji…";
+        UpdateStatusText = T("Pobieranie aktualizacji…", "Downloading update…");
         try
         {
             var progress = new Progress<double>(p => UpdateProgress = p);
             await _updater.DownloadAndInstallAsync(_pendingRelease, progress, CancellationToken.None);
-            UpdateStatusText = "Instalowanie – aplikacja uruchomi się ponownie.";
-            Log("Aktualizacja pobrana, restart…");
+            UpdateStatusText = T("Instalowanie – aplikacja uruchomi się ponownie.", "Installing — the app will restart.");
+            Log(T("Aktualizacja pobrana, restart…", "Update downloaded; restarting…"));
             await Task.Delay(500);
             (Avalonia.Application.Current as App)?.ExitApplication();
         }
         catch (Exception ex)
         {
-            UpdateStatusText = "Błąd aktualizacji: " + ex.Message;
+            UpdateStatusText = T("Błąd aktualizacji: ", "Update failed: ") + ex.Message;
             Log(UpdateStatusText);
             IsInstallingUpdate = false;
         }
@@ -307,7 +340,7 @@ public partial class MainViewModel : ObservableObject
         if (_loading) return;
         if (!OperatingSystem.IsWindows())
         {
-            AutostartStatus = "Dostępne tylko na Windows.";
+            AutostartStatus = T("Dostępne tylko na Windows.", "Available only on Windows.");
             return;
         }
         try
@@ -328,7 +361,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>Wpis do dziennika, gdy aplikacja wystartowała do zasobnika.</summary>
-    public void LogBackgroundStart() => Log("Start w tle (autostart) – okno ukryte, ikona w zasobniku");
+    public void LogBackgroundStart() => Log(T("Start w tle (autostart) – okno ukryte, ikona w zasobniku", "Started in the background; the app is available in the tray"));
 
     /// <summary>Podpina schowek okna głównego (dostępny dopiero po utworzeniu okna).</summary>
     public void AttachClipboard(IClipboard? clipboard)
@@ -339,7 +372,7 @@ public partial class MainViewModel : ObservableObject
         {
             if (!IsConnected || !ClipboardSyncEnabled) return;
             _client.SendClipboard(content);
-            ClipboardStatusText = $"Wysłano {content.Summary} do Maca · {DateTime.Now:HH:mm:ss}";
+            ClipboardStatusText = T($"Wysłano {content.Summary} do Maca · {DateTime.Now:HH:mm:ss}", $"Sent {content.Summary} to Mac · {DateTime.Now:HH:mm:ss}");
         };
         _clipboardSync.Error += message => ClipboardStatusText = message;
         _clipboardSync.Start();
@@ -383,9 +416,16 @@ public partial class MainViewModel : ObservableObject
 
     private void BeginConnect()
     {
+        if (!HasPairingKey)
+        {
+            PairingCodeInvalid = true;
+            PairingStatusText = T("Najpierw wpisz kod parowania z Maca.", "Enter the pairing code from your Mac first.");
+            Log(PairingStatusText);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(HostAddress))
         {
-            Log("Podaj adres IP Maca lub wybierz go z listy.");
+            Log(T("Podaj adres IP Maca lub wybierz go z listy.", "Enter the Mac IP address or select a discovered Mac."));
             return;
         }
         _desiredConnection = true;
@@ -406,8 +446,19 @@ public partial class MainViewModel : ObservableObject
             _disconnectedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             try
             {
-                Log($"Łączenie z {host}:{port}…");
-                await _client.ConnectAsync(host, port, DeviceName, ct);
+                Log(T($"Łączenie z {host}:{port}…", $"Connecting to {host}:{port}…"));
+                var pairingKey = PairingKeyStore.Load();
+                if (pairingKey is null)
+                {
+                    Post(() =>
+                    {
+                        HasPairingKey = false;
+                        PairingCodeInvalid = true;
+                        PairingStatusText = T("Nie można odczytać kodu parowania. Wpisz go ponownie.", "The pairing code could not be read. Enter it again.");
+                    });
+                    break;
+                }
+                await _client.ConnectAsync(host, port, DeviceName, pairingKey, ct);
                 await _disconnectedTcs.Task.WaitAsync(ct);
             }
             catch (OperationCanceledException)
@@ -416,7 +467,7 @@ public partial class MainViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                Log("Nie udało się połączyć: " + ex.Message);
+                Log(T("Nie udało się połączyć: ", "Connection failed: ") + ex.Message);
             }
             IsConnecting = false;
             UpdateStatus();
@@ -432,7 +483,9 @@ public partial class MainViewModel : ObservableObject
         IsConnected = true;
         IsConnecting = false;
         PeerName = string.IsNullOrWhiteSpace(macName) ? _client.RemoteAddress : macName;
-        Log($"Połączono z {PeerName} ({_client.RemoteAddress})");
+        PairingCodeInvalid = false;
+        PairingStatusText = T($"Bezpiecznie połączono z {PeerName}.", $"Securely connected to {PeerName}.");
+        Log(T($"Połączono z {PeerName} ({_client.RemoteAddress})", $"Connected to {PeerName} ({_client.RemoteAddress})"));
         UpdateStatus();
         SetupInputCapture();
         if (AudioEnabled) StartAudio();
@@ -448,7 +501,18 @@ public partial class MainViewModel : ObservableObject
         StopAudio(notifyMac: false);
         MacStatusText = "";
         MacAccessibilityMissing = false;
-        if (was) Log(reason is null ? "Rozłączono" : "Rozłączono: " + reason);
+        var pairingFailure = reason?.Contains("kod parowania", StringComparison.OrdinalIgnoreCase) == true
+                             || reason?.Contains("pairing", StringComparison.OrdinalIgnoreCase) == true;
+        if (pairingFailure)
+        {
+            // Błędny sekret nie jest zwykłą awarią sieci. Nie zapętlamy prób,
+            // żeby nie generować ruchu podobnego do ataku brute-force.
+            _desiredConnection = false;
+            _connectLoopCts?.Cancel();
+            PairingCodeInvalid = true;
+            PairingStatusText = reason ?? T("Mac odrzucił kod parowania.", "The Mac rejected the pairing code.");
+        }
+        if (was || reason is not null) Log(reason is null ? T("Rozłączono", "Disconnected") : T("Rozłączono: ", "Disconnected: ") + reason);
         UpdateStatus();
         _disconnectedTcs?.TrySetResult();
     }
@@ -479,14 +543,14 @@ public partial class MainViewModel : ObservableObject
                     var ax = flags.HasFlag(StatusFlags.AccessibilityGranted);
                     MacAccessibilityMissing = !ax;
                     MacStatusText = ax
-                        ? "Mac: uprawnienie Dostępność OK"
-                          + (flags.HasFlag(StatusFlags.CursorOnMac) ? " · Mac potwierdza sterowanie" : "")
-                          + (flags.HasFlag(StatusFlags.AudioCapturing) ? " · przechwytuje dźwięk" : "")
-                        : "Mac: BRAK uprawnienia Dostępność – nadaj je w Ustawieniach systemowych Maca (Prywatność i ochrona → Dostępność).";
+                        ? T("Mac: uprawnienie Dostępność OK", "Mac: Accessibility ready")
+                          + (flags.HasFlag(StatusFlags.CursorOnMac) ? T(" · Mac potwierdza sterowanie", " · control active") : "")
+                          + (flags.HasFlag(StatusFlags.AudioCapturing) ? T(" · przechwytuje dźwięk", " · audio capture active") : "")
+                        : T("Mac: BRAK uprawnienia Dostępność – nadaj je w Ustawieniach systemowych Maca (Prywatność i ochrona → Dostępność).", "Mac: Accessibility permission is missing. Enable it in System Settings → Privacy & Security → Accessibility.");
                     if (!ax && !_warnedAccessibility)
                     {
                         _warnedAccessibility = true;
-                        Log("Mac zgłasza brak uprawnienia Dostępność – sterowanie nie zadziała, dopóki go nie nadasz.");
+                        Log(T("Mac zgłasza brak uprawnienia Dostępność – sterowanie nie zadziała, dopóki go nie nadasz.", "The Mac reports missing Accessibility permission; control is unavailable until it is granted."));
                     }
                 }
                 break;
@@ -499,11 +563,11 @@ public partial class MainViewModel : ObservableObject
         if (existing is null)
         {
             DiscoveredPeers.Add(peer);
-            Log($"Znaleziono Maca: {peer.Name} ({peer.Address})");
+            Log(T($"Znaleziono Maca: {peer.Name} ({peer.Address})", $"Found Mac: {peer.Name} ({peer.Address})"));
             if (string.IsNullOrWhiteSpace(HostAddress))
             {
                 HostAddress = peer.Address;
-                if (AutoConnect && !_desiredConnection) BeginConnect();
+                if (AutoConnect && HasPairingKey && !_desiredConnection) BeginConnect();
             }
         }
         else if (existing.Name != peer.Name || existing.Port != peer.Port)
@@ -519,32 +583,33 @@ public partial class MainViewModel : ObservableObject
         if (value is null) return;
         HostAddress = value.Address;
         if (value.Port != _settings.ControlPort) ControlPortText = value.Port.ToString();
-        if (!IsConnected && !IsConnecting) BeginConnect();
+        if (HasPairingKey && !IsConnected && !IsConnecting) BeginConnect();
     }
 
     private void UpdateStatus()
     {
         if (IsConnected)
         {
-            StatusText = CursorOnMac ? "Sterujesz Makiem" : $"Połączono z {PeerName}";
+            StatusText = CursorOnMac ? T("Sterujesz Makiem", "Controlling Mac") : T($"Połączono z {PeerName}", $"Connected to {PeerName}");
             StatusBrush = Green;
-            ConnectionInfo = $"Połączono z {PeerName} · {_client.RemoteAddress}:{_settings.ControlPort}" + (RttMs > 0 ? $" · ping {RttMs:0.0} ms" : "");
+            var address = string.IsNullOrWhiteSpace(_client.RemoteAddress) ? HostAddress : _client.RemoteAddress;
+            ConnectionInfo = T($"Połączono z {PeerName}", $"Connected to {PeerName}") + $" · {address}:{_settings.ControlPort}" + (RttMs > 0 ? $" · ping {RttMs:0.0} ms" : "");
         }
         else if (IsConnecting)
         {
-            StatusText = "Łączenie…";
+            StatusText = T("Łączenie…", "Connecting…");
             StatusBrush = Orange;
-            ConnectionInfo = $"Próba połączenia z {HostAddress}:{_settings.ControlPort}…";
+            ConnectionInfo = T($"Próba połączenia z {HostAddress}:{_settings.ControlPort}…", $"Connecting to {HostAddress}:{_settings.ControlPort}…");
         }
         else
         {
-            StatusText = "Rozłączono";
+            StatusText = T("Rozłączono", "Disconnected");
             StatusBrush = Gray;
-            ConnectionInfo = "Nie połączono.";
+            ConnectionInfo = T("Nie połączono.", "Not connected.");
         }
         CursorStatusText = CursorOnMac
-            ? $"Na Macu · wysłane ruchy: {_capture?.RemoteMovesSent ?? 0}"
-            : "Na tym komputerze";
+            ? T($"Na Macu · wysłane ruchy: {_capture?.RemoteMovesSent ?? 0}", $"On Mac · pointer events: {_capture?.RemoteMovesSent ?? 0}")
+            : T("Na tym komputerze", "On this PC");
         CursorStatusBrush = CursorOnMac ? Green : Gray;
     }
 
@@ -556,7 +621,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (!OperatingSystem.IsWindows())
         {
-            Log("Przechwytywanie klawiatury/myszy działa tylko na Windows.");
+            Log(T("Przechwytywanie klawiatury/myszy działa tylko na Windows.", "Keyboard and pointer capture is available only on Windows."));
             return;
         }
         if (_capture is null)
@@ -571,6 +636,7 @@ public partial class MainViewModel : ObservableObject
         }
         _capture.Enabled = InputSharingEnabled;
         _capture.Side = SelectedMacSide.Value;
+        _capture.EmergencyVirtualKey = SelectedEmergencyHotkey.VirtualKey;
         _capture.HideCursorWhileRemote = HideCursorWhileRemote;
         _capture.RemoteMouseSpeed = RemoteMouseSpeed;
         ApplyHookState();
@@ -586,7 +652,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            Log("Błąd hooków: " + ex.Message);
+            Log(T("Błąd przechwytywania wejścia: ", "Input capture error: ") + ex.Message);
         }
     }
 
@@ -601,7 +667,7 @@ public partial class MainViewModel : ObservableObject
         AudioDevices.Clear();
         var devices = OperatingSystem.IsWindows()
             ? AudioPlayer.EnumerateOutputDevices()
-            : new[] { new AudioDeviceInfo(null, "Domyślne urządzenie systemowe") };
+            : new[] { new AudioDeviceInfo(null, T("Domyślne urządzenie systemowe", "Default system device")) };
         foreach (var d in devices) AudioDevices.Add(d);
         if (!_loading)
         {
@@ -614,22 +680,26 @@ public partial class MainViewModel : ObservableObject
         if (!IsConnected) return;
         if (!OperatingSystem.IsWindows())
         {
-            AudioStatusText = "Odtwarzanie WASAPI dostępne tylko na Windows.";
+            AudioStatusText = T("Odtwarzanie WASAPI dostępne tylko na Windows.", "WASAPI playback is available only on Windows.");
             AudioStatusBrush = Orange;
             return;
         }
         try
         {
-            var port = _audioRx.Start(_settings.AudioPort);
+            var audioKey = _client.AudioKey;
+            var sessionId = _client.AudioSessionId;
+            if (audioKey is null || sessionId is null)
+                throw new InvalidOperationException(T("Brak bezpiecznej sesji audio.", "No secure audio session is available."));
+            var port = _audioRx.Start(_settings.AudioPort, _client.RemoteAddress, audioKey, sessionId.Value);
             _audioRequested = true;
             _client.SendAudioStart((ushort)port);
-            AudioStatusText = $"Poproszono Maca o strumień na port UDP {port}… (przy pierwszym użyciu Mac pokaże okno zgody na nagrywanie dźwięku)";
+            AudioStatusText = T($"Poproszono Maca o strumień na port UDP {port}… (przy pierwszym użyciu Mac pokaże okno zgody na nagrywanie dźwięku)", $"Waiting for an encrypted stream on UDP {port}… The Mac may request audio permission.");
             AudioStatusBrush = Orange;
-            Log($"Audio: nasłuch UDP na porcie {port}, wysłano AUDIO_START");
+            Log(T($"Audio: nasłuch UDP na porcie {port}, wysłano AUDIO_START", $"Audio: listening on UDP {port}; AUDIO_START sent"));
         }
         catch (Exception ex)
         {
-            AudioStatusText = "Nie można otworzyć portu UDP: " + ex.Message;
+            AudioStatusText = T("Nie można otworzyć portu UDP: ", "Cannot open UDP port: ") + ex.Message;
             AudioStatusBrush = Red;
             Log(AudioStatusText);
         }
@@ -639,7 +709,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (!fmt.IsOk)
         {
-            AudioStatusText = "Mac odmówił: " + fmt.Message;
+            AudioStatusText = T("Mac odmówił: ", "Mac refused: ") + fmt.Message;
             AudioStatusBrush = Red;
             Log(AudioStatusText);
             _audioRx.Stop();
@@ -655,13 +725,13 @@ public partial class MainViewModel : ObservableObject
             _player ??= new AudioPlayer();
             var desc = _player.Start(SelectedAudioDevice?.Id, _jitter, ExclusiveMode, ExclusiveMode ? 5 : 15);
             AudioActive = true;
-            AudioStatusText = $"{fmt.SampleRate} Hz · {(fmt.Channels == 2 ? "stereo" : fmt.Channels + " kan.")} · {desc}";
+            AudioStatusText = $"{fmt.SampleRate} Hz · {(fmt.Channels == 2 ? "stereo" : T(fmt.Channels + " kan.", fmt.Channels + " ch."))} · {desc}";
             AudioStatusBrush = Green;
-            Log("Audio gra: " + AudioStatusText);
+            Log(T("Audio gra: ", "Audio playing: ") + AudioStatusText);
         }
         catch (Exception ex)
         {
-            AudioStatusText = "Błąd WASAPI: " + ex.Message;
+            AudioStatusText = T("Błąd WASAPI: ", "WASAPI error: ") + ex.Message;
             AudioStatusBrush = Red;
             Log(AudioStatusText);
         }
@@ -675,10 +745,10 @@ public partial class MainViewModel : ObservableObject
         _audioRx.Stop();
         _audioRx.Provider = null;
         _jitter = null;
-        if (AudioActive) Log("Audio zatrzymane");
+        if (AudioActive) Log(T("Audio zatrzymane", "Audio stopped"));
         AudioActive = false;
         AudioLevel = 0;
-        AudioStatusText = "Nieaktywne";
+        AudioStatusText = T("Nieaktywne", "Inactive");
         AudioStatusBrush = Gray;
         AudioStatsText = "";
     }
@@ -690,12 +760,12 @@ public partial class MainViewModel : ObservableObject
         {
             _jitter.Clear();
             var desc = _player.Start(SelectedAudioDevice?.Id, _jitter, ExclusiveMode, ExclusiveMode ? 5 : 15);
-            AudioStatusText = $"{_jitter.WaveFormat.SampleRate} Hz · {(_jitter.WaveFormat.Channels == 2 ? "stereo" : _jitter.WaveFormat.Channels + " kan.")} · {desc}";
-            Log("Audio: zmieniono urządzenie/tryb – " + desc);
+            AudioStatusText = $"{_jitter.WaveFormat.SampleRate} Hz · {(_jitter.WaveFormat.Channels == 2 ? "stereo" : T(_jitter.WaveFormat.Channels + " kan.", _jitter.WaveFormat.Channels + " ch."))} · {desc}";
+            Log(T("Audio: zmieniono urządzenie/tryb – ", "Audio output or mode changed — ") + desc);
         }
         catch (Exception ex)
         {
-            AudioStatusText = "Błąd WASAPI: " + ex.Message;
+            AudioStatusText = T("Błąd WASAPI: ", "WASAPI error: ") + ex.Message;
             AudioStatusBrush = Red;
             Log(AudioStatusText);
         }
@@ -710,7 +780,9 @@ public partial class MainViewModel : ObservableObject
             return;
         }
         AudioLevel = _audioRx.Level;
-        AudioStatsText = $"bufor {_jitter.BufferedMs} ms · pakiety {_audioRx.PacketsReceived} · utracone {_audioRx.PacketsLost} · underruns {_jitter.Underruns} · przycięcia {_jitter.Overruns}";
+        AudioStatsText = T(
+            $"bufor {_jitter.BufferedMs} ms · pakiety {_audioRx.PacketsReceived} · utracone {_audioRx.PacketsLost} · odrzucone {_audioRx.PacketsRejected} · niedopełnienia {_jitter.Underruns} · przepełnienia {_jitter.Overruns}",
+            $"buffer {_jitter.BufferedMs} ms · packets {_audioRx.PacketsReceived} · lost {_audioRx.PacketsLost} · rejected {_audioRx.PacketsRejected} · underruns {_jitter.Underruns} · overruns {_jitter.Overruns}");
         if (IsConnected) UpdateStatus();
     }
 
@@ -760,6 +832,13 @@ public partial class MainViewModel : ObservableObject
         if (_capture is not null) _capture.Side = value.Value;
     }
 
+    partial void OnSelectedEmergencyHotkeyChanged(EmergencyHotkeyOption value)
+    {
+        _settings.EmergencyHotkey = value.Value;
+        SaveSettings();
+        if (_capture is not null) _capture.EmergencyVirtualKey = value.VirtualKey;
+    }
+
     partial void OnAudioEnabledChanged(bool value)
     {
         _settings.AudioEnabled = value;
@@ -786,7 +865,7 @@ public partial class MainViewModel : ObservableObject
     private async Task ApplyClipboardAsync(ClipboardContent content)
     {
         if (_clipboardSync is not null && await _clipboardSync.ApplyAsync(content))
-            ClipboardStatusText = $"Odebrano {content.Summary} z Maca · {DateTime.Now:HH:mm:ss}";
+            ClipboardStatusText = T($"Odebrano {content.Summary} z Maca · {DateTime.Now:HH:mm:ss}", $"Received {content.Summary} from Mac · {DateTime.Now:HH:mm:ss}");
     }
 
     partial void OnClipboardSyncEnabledChanged(bool value)
@@ -801,6 +880,57 @@ public partial class MainViewModel : ObservableObject
         _settings.ExclusiveMode = value;
         SaveSettings();
         if (!_loading) RestartPlayer();
+    }
+
+    partial void OnPairingCodeChanged(string value)
+    {
+        if (PairingCodeInvalid) PairingCodeInvalid = false;
+    }
+
+    [RelayCommand]
+    private void SavePairingCode()
+    {
+        try
+        {
+            if (!PairingKeyStore.SaveCode(PairingCode))
+            {
+                PairingCodeInvalid = true;
+                PairingStatusText = T("Kod ma nieprawidłowy format. Przepisz wszystkie grupy z Maca.", "The code format is invalid. Enter every group shown on the Mac.");
+                return;
+            }
+            PairingCode = "";
+            HasPairingKey = true;
+            PairingCodeInvalid = false;
+            PairingStatusText = T("Kod zapisany bezpiecznie. Możesz teraz połączyć urządzenia.", "The code is protected. You can connect the devices now.");
+            Log(T("Zapisano nowy kod parowania w magazynie Windows.", "Saved a new pairing code in protected Windows storage."));
+            if (!string.IsNullOrWhiteSpace(HostAddress) && !IsConnected && !IsConnecting) BeginConnect();
+        }
+        catch (Exception ex)
+        {
+            PairingCodeInvalid = true;
+            PairingStatusText = T("Nie można zapisać kodu: ", "Cannot save the code: ") + ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private void ForgetPairing()
+    {
+        _desiredConnection = false;
+        _connectLoopCts?.Cancel();
+        _client.Disconnect(null);
+        try { PairingKeyStore.Clear(); } catch (Exception ex) { Log(T("Nie udało się usunąć kodu: ", "Could not remove the pairing code: ") + ex.Message); }
+        HasPairingKey = false;
+        PairingCode = "";
+        PairingCodeInvalid = false;
+        PairingStatusText = T("Usunięto zaufanie. Wpisz aktualny kod z Maca, aby połączyć ponownie.", "Trust removed. Enter the current code from the Mac to reconnect.");
+    }
+
+    [RelayCommand]
+    private void CompleteOnboarding()
+    {
+        HasCompletedOnboarding = true;
+        _settings.HasCompletedOnboarding = true;
+        SaveSettings();
     }
 
     private void SaveSettings()

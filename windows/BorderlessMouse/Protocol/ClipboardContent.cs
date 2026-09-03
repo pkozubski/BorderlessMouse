@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using static BorderlessMouse.Localization.L10n;
 
 namespace BorderlessMouse.Protocol;
 
@@ -16,7 +17,9 @@ public sealed class ClipboardContent
     public ClipboardFormat Format { get; }
     public ReadOnlyMemory<byte> Data { get; }
     public string? Text => Format == ClipboardFormat.Utf8Text ? StrictUtf8.GetString(Data.Span) : null;
-    public string Summary => Text is { } text ? $"{text.Length} zn." : $"obraz PNG ({(Data.Length + 1023) / 1024} KiB)";
+    public string Summary => Text is { } text
+        ? T($"{text.Length} zn.", $"{text.Length} characters")
+        : T($"obraz PNG ({(Data.Length + 1023) / 1024} KiB)", $"PNG image ({(Data.Length + 1023) / 1024} KiB)");
 
     private ClipboardContent(ClipboardFormat format, byte[] data)
     {

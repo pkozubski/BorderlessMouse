@@ -45,6 +45,8 @@ public static class NativeMethods
     public const uint KEYEVENTF_KEYUP = 0x0002;
 
     public const int VK_SCROLL = 0x91;
+    public const int VK_PAUSE = 0x13;
+    public const int VK_F12 = 0x7B;
 
     // okna / raw input
     public const uint WS_POPUP = 0x80000000;

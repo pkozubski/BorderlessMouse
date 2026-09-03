@@ -6,15 +6,19 @@ namespace BorderlessMouse.Protocol;
 /// <summary>Stałe protokołu – zgodne z PROTOCOL.md i aplikacją macOS.</summary>
 public static class ProtocolConstants
 {
-    public const byte Version = 1;
+    public const byte Version = 2;
     public const int DefaultControlPort = 47800;
     public const int DiscoveryPort = 47801;
     public const int DefaultAudioPort = 47802;
-    public const string DiscoveryRequest = "BLM1?";
-    public const string DiscoveryReply = "BLM1!";
+    public const string DiscoveryRequest = "BLM2?";
+    public const string DiscoveryReply = "BLM2!";
     public const ushort AudioMagic = 0x4D42;
+    public const byte AudioVersion = 2;
+    public const int AudioHeaderBytes = 32;
+    public const int AudioTagBytes = 16;
     /// <summary>Maksymalny rozmiar długiej ramki.</summary>
     public const int MaxLongFrame = MaxClipboardImageBytes + 1;
+    public const int MaxWireFrame = MaxLongFrame + 64;
     /// <summary>Limit tekstu schowka (bajty UTF-8).</summary>
     public const int MaxClipboardBytes = 1024 * 1024;
     public const int MaxClipboardImageBytes = 32 * 1024 * 1024;
@@ -24,7 +28,11 @@ public static class ProtocolConstants
 public enum MessageType : byte
 {
     Hello = 0x01,
-    Welcome = 0x02,
+    Challenge = 0x02,
+    Authenticate = 0x03,
+    Secure = 0x04,
+    Reject = 0x05,
+    Ready = 0x06,
     MouseMove = 0x10,
     MouseButton = 0x11,
     MouseWheel = 0x12,
@@ -69,9 +77,9 @@ public readonly record struct AudioFormatInfo(int SampleRate, int Channels, byte
 /// </summary>
 public static class Frame
 {
-    private static byte[] Make(MessageType type, ReadOnlySpan<byte> payload)
+    public static byte[] Make(MessageType type, ReadOnlySpan<byte> payload)
     {
-        if (payload.Length > ProtocolConstants.MaxLongFrame) throw new ArgumentException("payload too large");
+        if (payload.Length > ProtocolConstants.MaxWireFrame) throw new ArgumentException("payload too large");
         if (payload.Length < 255)
         {
             var buf = new byte[payload.Length + 2];
@@ -103,14 +111,55 @@ public static class Frame
         return ClipboardContent.Create((ClipboardFormat)p[0], p[1..]);
     }
 
-    public static byte[] Hello(string name)
+    public static byte[] Hello(string name, ReadOnlySpan<byte> nonce)
+    {
+        if (nonce.Length != BorderlessMouse.Security.ControlCrypto.NonceBytes) throw new ArgumentException("invalid nonce");
+        var nameBytes = Encoding.UTF8.GetBytes(name);
+        if (nameBytes.Length > 200) nameBytes = nameBytes[..200];
+        Span<byte> p = stackalloc byte[1 + BorderlessMouse.Security.ControlCrypto.NonceBytes + nameBytes.Length];
+        p[0] = ProtocolConstants.Version;
+        nonce.CopyTo(p[1..]);
+        nameBytes.CopyTo(p[(1 + BorderlessMouse.Security.ControlCrypto.NonceBytes)..]);
+        return Make(MessageType.Hello, p);
+    }
+
+    public static byte[] Challenge(string name, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> proof)
+    {
+        if (nonce.Length != BorderlessMouse.Security.ControlCrypto.NonceBytes || proof.Length != BorderlessMouse.Security.ControlCrypto.ProofBytes)
+            throw new ArgumentException("invalid challenge");
+        var nameBytes = Encoding.UTF8.GetBytes(name);
+        if (nameBytes.Length > 200) nameBytes = nameBytes[..200];
+        var p = new byte[1 + BorderlessMouse.Security.ControlCrypto.NonceBytes + BorderlessMouse.Security.ControlCrypto.ProofBytes + nameBytes.Length];
+        p[0] = ProtocolConstants.Version;
+        nonce.CopyTo(p.AsSpan(1));
+        proof.CopyTo(p.AsSpan(1 + BorderlessMouse.Security.ControlCrypto.NonceBytes));
+        nameBytes.CopyTo(p.AsSpan(1 + BorderlessMouse.Security.ControlCrypto.NonceBytes + BorderlessMouse.Security.ControlCrypto.ProofBytes));
+        return Make(MessageType.Challenge, p);
+    }
+
+    public static byte[] Authenticate(ReadOnlySpan<byte> proof)
+    {
+        if (proof.Length != BorderlessMouse.Security.ControlCrypto.ProofBytes) throw new ArgumentException("invalid proof");
+        return Make(MessageType.Authenticate, proof);
+    }
+
+    public static byte[] Secure(ReadOnlySpan<byte> envelope) => Make(MessageType.Secure, envelope);
+
+    public static byte[] Ready(string name)
     {
         var nameBytes = Encoding.UTF8.GetBytes(name);
         if (nameBytes.Length > 200) nameBytes = nameBytes[..200];
-        Span<byte> p = stackalloc byte[1 + nameBytes.Length];
-        p[0] = ProtocolConstants.Version;
-        nameBytes.CopyTo(p[1..]);
-        return Make(MessageType.Hello, p);
+        var payload = new byte[1 + nameBytes.Length];
+        payload[0] = ProtocolConstants.Version;
+        nameBytes.CopyTo(payload.AsSpan(1));
+        return Make(MessageType.Ready, payload);
+    }
+
+    public static byte[] Reject(string reason)
+    {
+        var bytes = Encoding.UTF8.GetBytes(reason);
+        if (bytes.Length > 200) bytes = bytes[..200];
+        return Make(MessageType.Reject, bytes);
     }
 
     public static byte[] MouseMove(int dx, int dy)
@@ -177,6 +226,8 @@ public static class Frame
         return Make(MessageType.Ping, p);
     }
 
+    public static byte[] Pong(ReadOnlySpan<byte> payload) => Make(MessageType.Pong, payload);
+
     // --- parsowanie ---
 
     public static (ScreenEdge edge, float ratio)? ParseLeave(ReadOnlySpan<byte> p)
@@ -193,9 +244,30 @@ public static class Frame
         return new AudioFormatInfo(rate, p[4], p[5], p[6], msg);
     }
 
-    public static string ParseWelcome(ReadOnlySpan<byte> p)
+    public static string ParseReady(ReadOnlySpan<byte> p)
         => p.Length > 1 ? Encoding.UTF8.GetString(p[1..]) : string.Empty;
 
     public static ulong? ParsePong(ReadOnlySpan<byte> p)
         => p.Length >= 8 ? BinaryPrimitives.ReadUInt64LittleEndian(p) : null;
+
+    public static bool TryParseSingle(ReadOnlySpan<byte> data, out MessageType type, out byte[] payload)
+    {
+        type = default;
+        payload = Array.Empty<byte>();
+        if (data.Length < 2 || !Enum.IsDefined(typeof(MessageType), data[0])) return false;
+        type = (MessageType)data[0];
+        var length = (int)data[1];
+        var header = 2;
+        if (length == 0xFF)
+        {
+            if (data.Length < 6) return false;
+            var unsignedLength = BinaryPrimitives.ReadUInt32LittleEndian(data[2..]);
+            if (unsignedLength > ProtocolConstants.MaxLongFrame) return false;
+            length = (int)unsignedLength;
+            header = 6;
+        }
+        if (length > ProtocolConstants.MaxLongFrame || data.Length != header + length) return false;
+        payload = data.Slice(header, length).ToArray();
+        return true;
+    }
 }

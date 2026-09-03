@@ -1,6 +1,7 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:sty="using:FluentAvalonia.Styling"
+             xmlns:loc="using:BorderlessMouse.Localization"
              x:Class="BorderlessMouse.App"
              RequestedThemeVariant="Default">
     <Application.Styles>
@@ -16,9 +17,9 @@
                       Clicked="TrayIcon_OnClicked">
                 <TrayIcon.Menu>
                     <NativeMenu>
-                        <NativeMenuItem Header="Pokaż okno" Click="ShowWindow_OnClick" />
+                        <NativeMenuItem Header="{x:Static loc:L10n.ShowWindow}" Click="ShowWindow_OnClick" />
                         <NativeMenuItemSeparator />
-                        <NativeMenuItem Header="Zakończ" Click="Exit_OnClick" />
+                        <NativeMenuItem Header="{x:Static loc:L10n.Quit}" Click="Exit_OnClick" />
                     </NativeMenu>
                 </TrayIcon.Menu>
             </TrayIcon>

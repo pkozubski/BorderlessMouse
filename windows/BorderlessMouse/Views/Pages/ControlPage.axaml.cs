@@ -7,5 +7,6 @@ public partial class ControlPage : UserControl
     public ControlPage()
     {
         InitializeComponent();
+        Localization.L10n.Apply(this);
     }
 }

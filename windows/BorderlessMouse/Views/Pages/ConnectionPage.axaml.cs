@@ -7,5 +7,6 @@ public partial class ConnectionPage : UserControl
     public ConnectionPage()
     {
         InitializeComponent();
+        Localization.L10n.Apply(this);
     }
 }

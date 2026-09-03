@@ -44,7 +44,7 @@
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <Grid ColumnDefinitions="*,Auto" MinHeight="34">
+                        <Grid ColumnDefinitions="*,Auto" MinHeight="44">
                             <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2" Margin="0,0,12,0">
                                 <TextBlock Classes="rowTitle" Text="{TemplateBinding Title}" />
                                 <TextBlock Classes="subtitle"
@@ -131,8 +131,21 @@
     <Style Selector="ToggleSwitch.compact">
         <Setter Property="OnContent" Value="" />
         <Setter Property="OffContent" Value="" />
-        <Setter Property="MinWidth" Value="0" />
-        <Setter Property="Margin" Value="0,-4,-8,-4" />
+        <Setter Property="MinHeight" Value="40" />
+        <Setter Property="MinWidth" Value="44" />
+        <Setter Property="Margin" Value="0,-2,0,-2" />
+    </Style>
+
+    <Style Selector="Button">
+        <Setter Property="MinHeight" Value="40" />
+    </Style>
+
+    <Style Selector="TextBox">
+        <Setter Property="MinHeight" Value="40" />
+    </Style>
+
+    <Style Selector="ComboBox">
+        <Setter Property="MinHeight" Value="40" />
     </Style>
 
     <Style Selector="Button.accent">

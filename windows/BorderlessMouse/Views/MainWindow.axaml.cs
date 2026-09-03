@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Media;
 using BorderlessMouse.Views.Pages;
+using BorderlessMouse.Localization;
 using FluentAvalonia.UI.Controls;
 using FluentAvalonia.UI.Windowing;
 
@@ -16,6 +17,12 @@ public partial class MainWindow : AppWindow
     public MainWindow()
     {
         InitializeComponent();
+        L10n.Apply(this);
+        foreach (var item in Nav.MenuItems.OfType<NavigationViewItem>()
+                     .Concat(Nav.FooterMenuItems.OfType<NavigationViewItem>()))
+        {
+            if (item.Content is string label) item.Content = L10n.TranslateText(label);
+        }
         TitleBar.ExtendsContentIntoTitleBar = true;
         TitleBar.TitleBarHitTestType = TitleBarHitTestType.Complex;
 
@@ -69,6 +76,7 @@ public partial class MainWindow : AppWindow
                 _ => new ConnectionPage(),
             };
             _pages[tag] = page;
+            L10n.Apply(page);
         }
         PageHost.Content = page;
     }
