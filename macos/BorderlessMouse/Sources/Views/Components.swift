@@ -1,32 +1,5 @@
 import SwiftUI
 
-/// Karta z nagłówkiem – wspólny język wizualny z wersją Windows.
-struct Card<Content: View>: View {
-    let title: String
-    let systemImage: String
-    @ViewBuilder let content: Content
-
-    init(_ title: String, systemImage: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.systemImage = systemImage
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title.uppercased(), systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .kerning(0.6)
-                .foregroundStyle(.secondary)
-            content
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
-    }
-}
-
 /// Wiersz ustawienia: tytuł + opcjonalny opis po lewej, kontrolka po prawej.
 struct SettingRow<Control: View>: View {
     let title: String
@@ -86,14 +59,5 @@ struct LevelMeter: View {
             }
         }
         .frame(height: 8)
-    }
-}
-
-extension View {
-    func rowDivider() -> some View {
-        VStack(spacing: 12) {
-            self
-            Divider()
-        }
     }
 }

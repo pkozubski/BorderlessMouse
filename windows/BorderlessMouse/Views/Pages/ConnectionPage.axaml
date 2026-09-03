@@ -1,0 +1,76 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="using:FluentAvalonia.UI.Controls"
+             xmlns:vm="using:BorderlessMouse.ViewModels"
+             xmlns:views="using:BorderlessMouse.Views"
+             xmlns:net="using:BorderlessMouse.Net"
+             x:Class="BorderlessMouse.Views.Pages.ConnectionPage"
+             x:DataType="vm:MainViewModel">
+    <ScrollViewer>
+        <StackPanel Classes="page">
+            <TextBlock Classes="pageTitle" Text="Połączenie z Makiem" />
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE839;" />
+                        <TextBlock Text="MAKI W SIECI LOKALNEJ" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="subtitle" Text="Na Macu musi działać BorderlessMouse. Kliknij, aby wybrać adres." />
+                        <ListBox ItemsSource="{Binding DiscoveredPeers}"
+                                 SelectedItem="{Binding SelectedPeer}"
+                                 MaxHeight="140" CornerRadius="8">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="net:DiscoveredPeer">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                                        <TextBlock Text="{Binding Address}" Foreground="{DynamicResource MutedText}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Classes="subtitle" Text="Nie znaleziono jeszcze żadnego Maca – wpisz adres ręcznie poniżej."
+                                   IsVisible="{Binding !HasDiscoveredPeers}" />
+                    </StackPanel>
+
+                    <Rectangle Classes="divider" />
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <TextBox Grid.Column="0" Text="{Binding HostAddress}" Watermark="Adres IP Maca, np. 192.168.1.20"
+                                 IsEnabled="{Binding !IsConnected}" />
+                        <Button Grid.Column="1" Classes="accent" MinWidth="110"
+                                Content="{Binding ConnectButtonText}"
+                                Command="{Binding ToggleConnectCommand}" />
+                    </Grid>
+
+                    <views:SettingRow Title="Łącz automatycznie" Subtitle="Przy starcie i po utracie połączenia próbuj ponownie.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding AutoConnect}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE946;" />
+                        <TextBlock Text="STAN" />
+                    </StackPanel>
+                    <views:SettingRow Title="{Binding ConnectionInfo}" Subtitle="{Binding MacStatusText}">
+                        <Border Classes="pill">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding StatusText}" FontWeight="Medium" FontSize="13" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Kursor" Subtitle="Scroll Lock przełącza sterowanie ręcznie w obie strony.">
+                        <TextBlock Text="{Binding CursorStatusText}" FontWeight="Medium" Foreground="{Binding CursorStatusBrush}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -77,11 +77,16 @@ autostart, wypisuje użyty mechanizm i przywraca poprzedni stan.
 
 ## Interfejs
 
-Obie aplikacje mają ten sam układ: nagłówek z logo i pastylką stanu, a pod nim karty
-(połączenie, klawiatura i mysz, dźwięk, schowek, uruchamianie, ustawienia, aktualizacje,
-dziennik) z wierszami „tytuł + opis + kontrolka”. Na Macu to SwiftUI, na Windowsie Avalonia
-z motywem FluentAvalonia (kontrolki WinUI 3, Mica, systemowy kolor akcentu), więc karty są
-wspólne, a przełączniki, listy i suwaki pochodzą z danego systemu.
+Obie aplikacje mają ten sam układ natywny dla swojego systemu: pasek boczny z sekcjami
+(Połączenie, Uprawnienia – tylko Mac, Sterowanie, Ustawienia, Dziennik). Każda sekcja to
+jedna przewijana strona z grupami (np. Sterowanie: klawiatura i mysz, dźwięk, schowek;
+Ustawienia: ogólne, uruchamianie, aktualizacje). Wiersze to „tytuł + opis + kontrolka”.
+
+* macOS: SwiftUI `NavigationSplitView` (sidebar jak w Ustawieniach systemowych) i
+  `Form(.grouped)`; wskaźnik stanu jest elementem paska narzędzi.
+* Windows: FluentAvalonia `NavigationView` (WinUI 3, Mica, systemowy kolor akcentu) z
+  kartami na stronach; komunikaty (aktualizacja, brak uprawnienia na Macu) są nad treścią
+  każdej strony.
 
 Wygląd kontrolek na Macu zależy od SDK, z którym zlinkowano aplikację: build z SDK macOS 26
 dostaje na Tahoe nowy wygląd systemu (szklane przełączniki, pigułkowe przyciski), starszy SDK
@@ -90,9 +95,13 @@ i Xcode, a CI buduje na `macos-26` z wymogiem `REQUIRE_SDK_MAJOR=26`.
 
 Podgląd wyglądu bez uruchamiania sieci i uprawnień:
 
-* macOS: `BorderlessMouse.app/Contents/MacOS/BorderlessMouse --ui-preview zrzut.png`
-* Windows: `BorderlessMouse.exe --screenshot zrzut.png` (zapisuje też `zrzut-bottom.png`
-  z dołem okna). W tym trybie aplikacja nie łączy się z niczym i pokazuje przykładowe dane.
+* macOS: `BorderlessMouse.app/Contents/MacOS/BorderlessMouse --ui-preview zrzut.png
+  [--ui-section connection|permissions|control|settings|log]` – okno pojawia się na
+  ekranie na około sekundę (sidebar i toolbar renderuje dopiero kompozytor).
+* Windows: `BorderlessMouse.exe --screenshot zrzut.png` (zapisuje pierwszą stronę pod tą
+  nazwą, a pozostałe jako `zrzut-control.png`, `zrzut-settings.png`, `zrzut-log.png`).
+
+W tym trybie aplikacja nie łączy się z niczym i pokazuje przykładowe dane.
 
 ## Auto-updater
 
@@ -241,7 +250,7 @@ macos/
     Network/    ControlServer (TCP), DiscoveryResponder (UDP), AudioSender (UDP)
     Input/      InputInjector (CGEvent), KeyMap (scancode → kVK)
     Audio/      SystemAudioTap (Core Audio process tap)
-    Views/      ContentView (karty), Components (Card, SettingRow, StatusPill), pasek menu
+    Views/      ContentView (sidebar + strony), Components (SettingRow, StatusPill), pasek menu
 assets/logo/                 – wspólne logo + skrypt generujący .icns/.ico/.png
 .github/workflows/           – CI (build obu aplikacji) i Release (tag v* → GitHub Release)
 windows/
@@ -250,7 +259,7 @@ windows/
     Models/     Settings, Autostart (klucz Run w rejestrze)
     Net/        ControlClient (TCP), Discovery (UDP), AudioReceiver (UDP), ClipboardSync, Updater
     Audio/      JitterBufferProvider, AudioPlayer (NAudio/WASAPI)
-    Views/      MainWindow.axaml (karty w AppWindow z Mica), SettingRow
+    Views/      MainWindow.axaml (NavigationView w AppWindow z Mica), Pages/ (strony), SettingRow
     ViewModels/ MainViewModel
 ```
 

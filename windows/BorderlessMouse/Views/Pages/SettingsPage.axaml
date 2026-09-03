@@ -1,0 +1,70 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="using:FluentAvalonia.UI.Controls"
+             xmlns:vm="using:BorderlessMouse.ViewModels"
+             xmlns:views="using:BorderlessMouse.Views"
+             x:Class="BorderlessMouse.Views.Pages.SettingsPage"
+             x:DataType="vm:MainViewModel">
+    <ScrollViewer>
+        <StackPanel Classes="page">
+            <TextBlock Classes="pageTitle" Text="Ustawienia" />
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="OGÓLNE" />
+                    </StackPanel>
+                    <views:SettingRow Title="Nazwa tego komputera" Subtitle="Widoczna w aplikacji na Macu.">
+                        <TextBox Text="{Binding DeviceName}" Width="200" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Port TCP Maca" Subtitle="Domyślnie 47800 – musi zgadzać się z ustawieniem na Macu.">
+                        <TextBox Text="{Binding ControlPortText}" Width="90" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Port UDP audio (ten komputer)" Subtitle="Domyślnie 47802. Zapora Windows musi go przepuszczać.">
+                        <TextBox Text="{Binding AudioPortText}" Width="90" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+        
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="URUCHAMIANIE" />
+                    </StackPanel>
+                    <views:SettingRow Title="Uruchamiaj przy logowaniu" Subtitle="{Binding AutostartStatus}">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding LaunchAtLogin}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Startuj zminimalizowany do zasobnika"
+                                      Subtitle="Przy autostarcie okno pozostaje ukryte; kliknij ikonę w zasobniku, aby je otworzyć.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding StartMinimized}" IsEnabled="{Binding LaunchAtLogin}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+        
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="AKTUALIZACJE" />
+                    </StackPanel>
+                    <views:SettingRow Title="{Binding VersionLabel}" Subtitle="{Binding UpdateStatusText}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ProgressBar IsIndeterminate="True" Width="120" Height="4" IsVisible="{Binding IsCheckingUpdates}" />
+                            <ProgressBar Minimum="0" Maximum="1" Value="{Binding UpdateProgress}" Width="120" Height="4" IsVisible="{Binding IsInstallingUpdate}" />
+                            <Button Content="Sprawdź teraz" Command="{Binding CheckUpdatesCommand}" IsVisible="{Binding !UpdateAvailable}" />
+                            <Button Classes="accent" Content="Zainstaluj" Command="{Binding InstallUpdateCommand}" IsVisible="{Binding UpdateAvailable}" />
+                        </StackPanel>
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Sprawdzaj automatycznie" Subtitle="Po starcie i co 6 godzin, przez GitHub Releases.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding AutoCheckUpdates}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

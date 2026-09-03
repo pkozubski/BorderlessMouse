@@ -1,11 +1,18 @@
 using Avalonia.Controls;
 using Avalonia.Media;
+using BorderlessMouse.Views.Pages;
+using FluentAvalonia.UI.Controls;
 using FluentAvalonia.UI.Windowing;
 
 namespace BorderlessMouse.Views;
 
 public partial class MainWindow : AppWindow
 {
+    /// <summary>Kolejność stron w pasku bocznym – używana też przez tryb <c>--screenshot</c>.</summary>
+    public static readonly IReadOnlyList<string> PageTags = new[] { "connection", "control", "settings", "log" };
+
+    private readonly Dictionary<string, Control> _pages = new();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -29,6 +36,41 @@ public partial class MainWindow : AppWindow
                 Hide();
             }
         };
+
+        NavigateTo(PageTags[0]);
+    }
+
+    /// <summary>Wybiera stronę w pasku bocznym po jej znaczniku.</summary>
+    public void NavigateTo(string tag)
+    {
+        var item = Nav.MenuItems.OfType<NavigationViewItem>()
+            .Concat(Nav.FooterMenuItems.OfType<NavigationViewItem>())
+            .FirstOrDefault(i => (string?)i.Tag == tag);
+        if (item is null) return;
+        if (!ReferenceEquals(Nav.SelectedItem, item)) Nav.SelectedItem = item;
+        ShowPage(tag);
+    }
+
+    private void Nav_OnSelectionChanged(object? sender, NavigationViewSelectionChangedEventArgs e)
+    {
+        if (e.SelectedItem is NavigationViewItem { Tag: string tag }) ShowPage(tag);
+    }
+
+    private void ShowPage(string tag)
+    {
+        if (!_pages.TryGetValue(tag, out var page))
+        {
+            page = tag switch
+            {
+                "connection" => new ConnectionPage(),
+                "control" => new ControlPage(),
+                "settings" => new SettingsPage(),
+                "log" => new LogPage(),
+                _ => new ConnectionPage(),
+            };
+            _pages[tag] = page;
+        }
+        PageHost.Content = page;
     }
 
     private void ApplyBackdrop()

@@ -2,10 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using Avalonia.Controls.Primitives;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using BorderlessMouse.ViewModels;
 using BorderlessMouse.Views;
 
@@ -64,14 +62,14 @@ public partial class App : Application
         {
             try
             {
-                Capture(path);
-                // druga klatka: dół strony (dalsze grupy ustawień)
-                var scroll = _mainWindow.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-                if (scroll is not null)
+                // pierwsza strona pod podaną nazwą, pozostałe strony paska bocznego z sufiksem
+                var stem = Path.ChangeExtension(path, null);
+                var ext = Path.GetExtension(path);
+                foreach (var (tag, i) in MainWindow.PageTags.Select((t, i) => (t, i)))
                 {
-                    scroll.Offset = new Vector(0, scroll.Extent.Height);
+                    _mainWindow.NavigateTo(tag);
                     _mainWindow.UpdateLayout();
-                    Capture(Path.ChangeExtension(path, null) + "-bottom" + Path.GetExtension(path));
+                    Capture(i == 0 ? path : $"{stem}-{tag}{ext}");
                 }
             }
             finally

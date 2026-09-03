@@ -4,6 +4,10 @@ import SwiftUI
 /// Renderowanie interfejsu do pliku PNG bez uruchamiania serwera, audio ani
 /// uprawnień – diagnostyka wyglądu (`--ui-preview <plik.png>`).
 /// Odpowiednik `--screenshot` w wersji Windows.
+///
+/// Okno jest pokazywane na chwilę na ekranie: pasek boczny (materiał) i pasek
+/// narzędzi renderuje dopiero kompozytor, więc zrzut z NSHostingView poza oknem
+/// byłby niepełny. Sekcję paska bocznego wybiera `--ui-section <connection|permissions|control|settings|log>`.
 @MainActor
 enum UIPreview {
     static func run() -> Never {
@@ -14,25 +18,38 @@ enum UIPreview {
         }
         let path = args[idx + 1]
         let state = AppState.demo()
-        let root = ContentView().environmentObject(state)
-        let size = CGSize(width: 560, height: 1180)
-        // NSHostingView renderuje karty wiernie; materiały systemowe wymagałyby
-        // prawdziwego okna na ekranie.
-        let hosting = NSHostingView(rootView: root.frame(width: size.width, height: size.height))
-        hosting.frame = CGRect(origin: .zero, size: size)
-        hosting.layoutSubtreeIfNeeded()
-        for _ in 0..<3 {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-            hosting.layoutSubtreeIfNeeded()
+        var section = SidebarSection.connection
+        if let s = args.firstIndex(of: "--ui-section"), s + 1 < args.count, let parsed = SidebarSection(rawValue: args[s + 1]) {
+            section = parsed
         }
-        guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
-            FileHandle.standardError.write(Data("nie udało się utworzyć bitmapy\n".utf8))
+        let root = ContentView(initialSection: section).environmentObject(state)
+        let size = CGSize(width: 880, height: 620)
+
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.title = "BorderlessMouse"
+        window.toolbarStyle = .unified
+        window.contentView = NSHostingView(rootView: root)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        app.activate(ignoringOtherApps: true)
+
+        for _ in 0..<5 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        }
+
+        let windowID = CGWindowID(window.windowNumber)
+        guard let cg = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) else {
+            FileHandle.standardError.write(Data("nie udało się zrzucić okna\n".utf8))
             exit(3)
         }
-        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let rep = NSBitmapImageRep(cgImage: cg)
         guard let png = rep.representation(using: .png, properties: [:]) else { exit(3) }
         try? png.write(to: URL(fileURLWithPath: path))
-        print("zapisano \(path) (\(Int(size.width))×\(Int(size.height)))")
+        print("zapisano \(path) (\(cg.width)×\(cg.height) px)")
         exit(0)
     }
 }

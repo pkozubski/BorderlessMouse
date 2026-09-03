@@ -1,0 +1,108 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="using:FluentAvalonia.UI.Controls"
+             xmlns:vm="using:BorderlessMouse.ViewModels"
+             xmlns:views="using:BorderlessMouse.Views"
+             x:Class="BorderlessMouse.Views.Pages.ControlPage"
+             x:DataType="vm:MainViewModel">
+    <ScrollViewer>
+        <StackPanel Classes="page">
+            <TextBlock Classes="pageTitle" Text="Sterowanie" />
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="KLAWIATURA I MYSZ" />
+                    </StackPanel>
+                    <views:SettingRow Title="Udostępniaj klawiaturę i mysz"
+                                      Subtitle="Krawędź przełącza na Maca. Pełny ekran i przechwycona mysz blokują automatyczne przejście.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding InputSharingEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Mac stoi względem tego ekranu"
+                                      Subtitle="Krawędź, przez którą kursor przechodzi na Maca.">
+                        <ComboBox ItemsSource="{Binding MacSides}" SelectedItem="{Binding SelectedMacSide}" MinWidth="150" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Czułość myszy na Macu" Subtitle="{Binding RemoteMouseSpeedLabel}">
+                        <Slider Minimum="0.25" Maximum="4" TickFrequency="0.25" IsSnapToTickEnabled="True"
+                                Value="{Binding RemoteMouseSpeed}" Width="190" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Ukrywaj kursor podczas sterowania Makiem"
+                                      Subtitle="Kursor zostaje przy krawędzi, przez którą wyszedł, i znika pod niewidocznym oknem.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding HideCursorWhileRemote}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Kursor" Subtitle="Scroll Lock przełącza sterowanie ręcznie w obie strony.">
+                        <TextBlock Text="{Binding CursorStatusText}" FontWeight="Medium" Foreground="{Binding CursorStatusBrush}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+        
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="DŹWIĘK" />
+                    </StackPanel>
+                    <views:SettingRow Title="Odbieraj dźwięk z Maca"
+                                      Subtitle="Cały dźwięk systemowy Maca gra na wybranym urządzeniu (UDP, PCM 16-bit).">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding AudioEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Urządzenie wyjściowe" Subtitle="Słuchawki lub głośniki podłączone do Windowsa.">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" MinWidth="220" MaxWidth="260" />
+                            <Button Command="{Binding RefreshAudioDevicesCommand}" ToolTip.Tip="Odśwież listę urządzeń">
+                                <ui:FontIcon Glyph="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="14" />
+                            </Button>
+                        </StackPanel>
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Bufor sieciowy" Subtitle="{Binding JitterBufferLabel}">
+                        <Slider Minimum="5" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                                Value="{Binding JitterBufferMs}" Width="190" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Tryb WASAPI exclusive"
+                                      Subtitle="Najniższe opóźnienie, ale blokuje kartę dla innych aplikacji. Przy braku wsparcia wraca do shared.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding ExclusiveMode}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="8">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Classes="icon" Text="&#xE767;" />
+                        <TextBlock Text="STAN STRUMIENIA" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Ellipse Width="8" Height="8" Fill="{Binding AudioStatusBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding AudioStatusText}" FontSize="13" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ProgressBar Classes="level" Minimum="0" Maximum="1" Value="{Binding AudioLevel}" />
+                    <TextBlock Classes="subtitle" Text="{Binding AudioStatsText}" />
+                </StackPanel>
+            </Border>
+        
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="SCHOWEK" />
+                    </StackPanel>
+                    <views:SettingRow Title="Synchronizuj schowek (tekst i zdjęcia)"
+                                      Subtitle="Kopiuj i wklejaj tekst, zdjęcia oraz zrzuty ekranu w obie strony. Obrazy do 32 MiB.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding ClipboardSyncEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Ostatnia synchronizacja" Subtitle="{Binding ClipboardStatusText}">
+                        <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" />
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

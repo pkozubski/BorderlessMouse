@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BorderlessMouse.ViewModels"
+             x:Class="BorderlessMouse.Views.Pages.LogPage"
+             x:DataType="vm:MainViewModel">
+    <Grid RowDefinitions="Auto,*" Margin="24,20,24,20">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+            <TextBlock Classes="pageTitle" Text="Dziennik" />
+            <Button Grid.Column="1" Content="Wyczyść" Command="{Binding ClearLogCommand}" VerticalAlignment="Center" />
+        </Grid>
+        <Border Grid.Row="1" Classes="card">
+            <ScrollViewer>
+                <ItemsControl ItemsSource="{Binding LogLines}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                            <TextBlock Classes="mono" Text="{Binding}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</UserControl>

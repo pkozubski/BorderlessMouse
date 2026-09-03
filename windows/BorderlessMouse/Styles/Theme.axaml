@@ -63,6 +63,16 @@
         </ResourceDictionary>
     </Styles.Resources>
 
+    <!-- Układ stron paska bocznego: tytuł jak w Ustawieniach Windows 11, karty z odstępem -->
+    <Style Selector="TextBlock.pageTitle">
+        <Setter Property="FontSize" Value="26" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="StackPanel.page">
+        <Setter Property="Spacing" Value="14" />
+        <Setter Property="Margin" Value="24,20,24,20" />
+        <Setter Property="MaxWidth" Value="900" />
+    </Style>
     <Style Selector="Border.card">
         <Setter Property="Background" Value="{DynamicResource CardBackground}" />
         <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}" />

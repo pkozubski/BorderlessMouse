@@ -3,283 +3,100 @@
                xmlns:wnd="using:FluentAvalonia.UI.Windowing"
                xmlns:ui="using:FluentAvalonia.UI.Controls"
                xmlns:vm="using:BorderlessMouse.ViewModels"
-               xmlns:views="using:BorderlessMouse.Views"
-               xmlns:net="using:BorderlessMouse.Net"
+               xmlns:pages="using:BorderlessMouse.Views.Pages"
                x:Class="BorderlessMouse.Views.MainWindow"
                x:DataType="vm:MainViewModel"
                Title="BorderlessMouse"
                Icon="avares://BorderlessMouse/Assets/icon.png"
-               Width="620" Height="940"
-               MinWidth="560" MinHeight="600"
+               Width="920" Height="660"
+               MinWidth="760" MinHeight="540"
                WindowStartupLocation="CenterScreen">
 
-    <ScrollViewer>
-        <StackPanel Spacing="14" Margin="20,40,20,20">
+    <Grid RowDefinitions="32,*">
 
-            <!-- Nagłówek -->
-            <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,4">
-                <Image Source="avares://BorderlessMouse/Assets/logo.png" Width="56" Height="56" />
-                <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center" Spacing="2">
-                    <TextBlock Text="BorderlessMouse" FontSize="22" FontWeight="SemiBold" />
-                    <TextBlock Classes="subtitle" Text="Windows: wysyła klawiaturę i mysz, odbiera dźwięk i schowek z Maca" />
+        <!-- Pasek tytułu (obszar przeciągania okna): ikona + nazwa jak w aplikacjach Windows 11 -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="12,0,150,0">
+            <Image Source="avares://BorderlessMouse/Assets/icon.png" Width="16" Height="16" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="BorderlessMouse" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center" />
+            <Border Grid.Column="2" Classes="pill" Padding="8,2">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Ellipse Width="7" Height="7" Fill="{Binding StatusBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StatusText}" FontSize="12" FontWeight="Medium" VerticalAlignment="Center" />
                 </StackPanel>
-                <Border Grid.Column="2" Classes="pill">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding StatusText}" FontWeight="Medium" FontSize="13" VerticalAlignment="Center" />
+            </Border>
+        </Grid>
+
+        <!-- Pasek boczny (WinUI 3 NavigationView) + zawartość strony -->
+        <ui:NavigationView x:Name="Nav" Grid.Row="1"
+                           PaneDisplayMode="Left"
+                           OpenPaneLength="220"
+                           CompactModeThresholdWidth="0"
+                           ExpandedModeThresholdWidth="700"
+                           IsBackButtonVisible="False"
+                           IsSettingsVisible="False"
+                           SelectionChanged="Nav_OnSelectionChanged">
+
+            <ui:NavigationView.PaneHeader>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="8,8,0,10">
+                    <Image Source="avares://BorderlessMouse/Assets/logo.png" Width="36" Height="36" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="BorderlessMouse" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Windows" Classes="subtitle" />
                     </StackPanel>
-                </Border>
+                </StackPanel>
+            </ui:NavigationView.PaneHeader>
+
+            <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem Content="Połączenie" Tag="connection">
+                    <ui:NavigationViewItem.IconSource>
+                        <ui:FontIconSource Glyph="&#xE839;" FontFamily="{StaticResource IconFont}" />
+                    </ui:NavigationViewItem.IconSource>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="Sterowanie" Tag="control">
+                    <ui:NavigationViewItem.IconSource>
+                        <ui:FontIconSource Glyph="&#xE765;" FontFamily="{StaticResource IconFont}" />
+                    </ui:NavigationViewItem.IconSource>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="Ustawienia" Tag="settings">
+                    <ui:NavigationViewItem.IconSource>
+                        <ui:FontIconSource Glyph="&#xE713;" FontFamily="{StaticResource IconFont}" />
+                    </ui:NavigationViewItem.IconSource>
+                </ui:NavigationViewItem>
+            </ui:NavigationView.MenuItems>
+
+            <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem Content="Dziennik" Tag="log">
+                    <ui:NavigationViewItem.IconSource>
+                        <ui:FontIconSource Glyph="&#xE7C3;" FontFamily="{StaticResource IconFont}" />
+                    </ui:NavigationViewItem.IconSource>
+                </ui:NavigationViewItem>
+            </ui:NavigationView.FooterMenuItems>
+
+            <ui:NavigationView.PaneFooter>
+                <TextBlock Text="{Binding VersionLabel}" Classes="subtitle" Margin="16,0,0,12" />
+            </ui:NavigationView.PaneFooter>
+
+            <Grid RowDefinitions="Auto,Auto,*">
+                <!-- Komunikaty globalne – widoczne na każdej stronie -->
+                <ui:InfoBar Grid.Row="0" Margin="24,8,24,0"
+                            IsOpen="{Binding UpdateAvailable}"
+                            Severity="Informational"
+                            Title="Dostępna aktualizacja"
+                            Message="{Binding UpdateMessage}"
+                            IsClosable="True">
+                    <ui:InfoBar.ActionButton>
+                        <Button Content="Zainstaluj i uruchom ponownie" Command="{Binding InstallUpdateCommand}" />
+                    </ui:InfoBar.ActionButton>
+                </ui:InfoBar>
+                <ui:InfoBar Grid.Row="1" Margin="24,8,24,0"
+                            IsOpen="{Binding MacAccessibilityMissing}"
+                            Severity="Warning"
+                            Title="Mac nie ma uprawnienia Dostępność"
+                            Message="Sterowanie nie zadziała, dopóki na Macu nie nadasz BorderlessMouse uprawnienia w Ustawieniach systemowych (Prywatność i ochrona, sekcja Dostępność)."
+                            IsClosable="False" />
+
+                <ContentControl Grid.Row="2" x:Name="PageHost" />
             </Grid>
-
-            <ui:InfoBar IsOpen="{Binding UpdateAvailable}"
-                        Severity="Informational"
-                        Title="Dostępna aktualizacja"
-                        Message="{Binding UpdateMessage}"
-                        IsClosable="True">
-                <ui:InfoBar.ActionButton>
-                    <Button Content="Zainstaluj i uruchom ponownie" Command="{Binding InstallUpdateCommand}" />
-                </ui:InfoBar.ActionButton>
-            </ui:InfoBar>
-            <ui:InfoBar IsOpen="{Binding MacAccessibilityMissing}"
-                        Severity="Warning"
-                        Title="Mac nie ma uprawnienia Dostępność"
-                        Message="Sterowanie nie zadziała, dopóki na Macu nie nadasz BorderlessMouse uprawnienia w Ustawieniach systemowych (Prywatność i ochrona, sekcja Dostępność)."
-                        IsClosable="False" />
-
-            <!-- Połączenie -->
-            <Border Classes="card">
-                <StackPanel Spacing="12">
-                    <StackPanel Classes="sectionHeader">
-                        <TextBlock Classes="icon" Text="&#xE839;" />
-                        <TextBlock Text="POŁĄCZENIE Z MAKIEM" />
-                    </StackPanel>
-
-                    <StackPanel Spacing="6">
-                        <TextBlock Classes="rowTitle" Text="Znalezione Maki w sieci lokalnej" />
-                        <TextBlock Classes="subtitle" Text="Na Macu musi działać BorderlessMouse. Kliknij, aby wybrać adres." />
-                        <ListBox ItemsSource="{Binding DiscoveredPeers}"
-                                 SelectedItem="{Binding SelectedPeer}"
-                                 MaxHeight="110" CornerRadius="8">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate x:DataType="net:DiscoveredPeer">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="{Binding Name}" FontWeight="Medium" />
-                                        <TextBlock Text="{Binding Address}" Foreground="{DynamicResource MutedText}" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                        <TextBlock Classes="subtitle" Text="Nie znaleziono jeszcze żadnego Maca – wpisz adres ręcznie poniżej."
-                                   IsVisible="{Binding !HasDiscoveredPeers}" />
-                    </StackPanel>
-
-                    <Rectangle Classes="divider" />
-
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                        <TextBox Grid.Column="0" Text="{Binding HostAddress}" Watermark="Adres IP Maca, np. 192.168.1.20"
-                                 IsEnabled="{Binding !IsConnected}" />
-                        <Button Grid.Column="1" Classes="accent" MinWidth="110"
-                                Content="{Binding ConnectButtonText}"
-                                Command="{Binding ToggleConnectCommand}" />
-                    </Grid>
-
-                    <views:SettingRow Title="Łącz automatycznie" Subtitle="Przy starcie i po utracie połączenia próbuj ponownie.">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding AutoConnect}" />
-                    </views:SettingRow>
-
-                    <Rectangle Classes="divider" />
-
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="{Binding ConnectionInfo}" FontSize="13" />
-                        <TextBlock Classes="subtitle" Text="{Binding MacStatusText}" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <!-- Klawiatura i mysz -->
-            <Border Classes="card">
-                <StackPanel Spacing="12">
-                    <StackPanel Classes="sectionHeader">
-                        <TextBlock Classes="icon" Text="&#xE765;" />
-                        <TextBlock Text="KLAWIATURA I MYSZ DO MACA" />
-                    </StackPanel>
-
-                    <views:SettingRow Title="Udostępniaj klawiaturę i mysz"
-                                      Subtitle="Krawędź przełącza na Maca. Pełny ekran i przechwycona mysz blokują automatyczne przejście.">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding InputSharingEnabled}" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-
-                    <views:SettingRow Title="Mac stoi względem tego ekranu"
-                                      Subtitle="Krawędź, przez którą kursor przechodzi na Maca.">
-                        <ComboBox ItemsSource="{Binding MacSides}" SelectedItem="{Binding SelectedMacSide}" MinWidth="150" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-
-                    <views:SettingRow Title="Czułość myszy na Macu" Subtitle="{Binding RemoteMouseSpeedLabel}">
-                        <Slider Minimum="0.25" Maximum="4" TickFrequency="0.25" IsSnapToTickEnabled="True"
-                                Value="{Binding RemoteMouseSpeed}" Width="190" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-
-                    <views:SettingRow Title="Ukrywaj kursor podczas sterowania Makiem"
-                                      Subtitle="Kursor zostaje przy krawędzi, przez którą wyszedł, i znika pod niewidocznym oknem.">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding HideCursorWhileRemote}" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-
-                    <views:SettingRow Title="Kursor" Subtitle="Scroll Lock przełącza sterowanie ręcznie w obie strony.">
-                        <TextBlock Text="{Binding CursorStatusText}" FontWeight="Medium" Foreground="{Binding CursorStatusBrush}" />
-                    </views:SettingRow>
-                </StackPanel>
-            </Border>
-
-            <!-- Dźwięk -->
-            <Border Classes="card">
-                <StackPanel Spacing="12">
-                    <StackPanel Classes="sectionHeader">
-                        <TextBlock Classes="icon" Text="&#xE767;" />
-                        <TextBlock Text="DŹWIĘK Z MACA" />
-                    </StackPanel>
-
-                    <views:SettingRow Title="Odbieraj dźwięk z Maca"
-                                      Subtitle="Cały dźwięk systemowy Maca gra na wybranym urządzeniu (UDP, PCM 16-bit).">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding AudioEnabled}" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-
-                    <views:SettingRow Title="Urządzenie wyjściowe" Subtitle="Słuchawki lub głośniki podłączone do Windowsa.">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" MinWidth="220" MaxWidth="260" />
-                            <Button Command="{Binding RefreshAudioDevicesCommand}" ToolTip.Tip="Odśwież listę urządzeń">
-                                <ui:FontIcon Glyph="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="14" />
-                            </Button>
-                        </StackPanel>
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-
-                    <views:SettingRow Title="Bufor sieciowy" Subtitle="{Binding JitterBufferLabel}">
-                        <Slider Minimum="5" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
-                                Value="{Binding JitterBufferMs}" Width="190" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-
-                    <views:SettingRow Title="Tryb WASAPI exclusive"
-                                      Subtitle="Najniższe opóźnienie, ale blokuje kartę dla innych aplikacji. Przy braku wsparcia wraca do shared.">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding ExclusiveMode}" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-
-                    <StackPanel Spacing="8">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Ellipse Width="8" Height="8" Fill="{Binding AudioStatusBrush}" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding AudioStatusText}" FontSize="13" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ProgressBar Classes="level" Minimum="0" Maximum="1" Value="{Binding AudioLevel}" />
-                        <TextBlock Classes="subtitle" Text="{Binding AudioStatsText}" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <!-- Schowek -->
-            <Border Classes="card">
-                <StackPanel Spacing="12">
-                    <StackPanel Classes="sectionHeader">
-                        <TextBlock Classes="icon" Text="&#xE77F;" />
-                        <TextBlock Text="SCHOWEK" />
-                    </StackPanel>
-                    <views:SettingRow Title="Synchronizuj schowek (tekst i zdjęcia)"
-                                      Subtitle="Kopiuj i wklejaj tekst, zdjęcia oraz zrzuty ekranu w obie strony. Obrazy do 32 MiB.">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding ClipboardSyncEnabled}" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-                    <views:SettingRow Title="Ostatnia synchronizacja" Subtitle="{Binding ClipboardStatusText}">
-                        <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" />
-                    </views:SettingRow>
-                </StackPanel>
-            </Border>
-
-            <!-- Uruchamianie -->
-            <Border Classes="card">
-                <StackPanel Spacing="12">
-                    <StackPanel Classes="sectionHeader">
-                        <TextBlock Classes="icon" Text="&#xE7E8;" />
-                        <TextBlock Text="URUCHAMIANIE" />
-                    </StackPanel>
-                    <views:SettingRow Title="Uruchamiaj przy logowaniu" Subtitle="{Binding AutostartStatus}">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding LaunchAtLogin}" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-                    <views:SettingRow Title="Startuj zminimalizowany do zasobnika"
-                                      Subtitle="Przy autostarcie okno pozostaje ukryte; kliknij ikonę w zasobniku, aby je otworzyć.">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding StartMinimized}" IsEnabled="{Binding LaunchAtLogin}" />
-                    </views:SettingRow>
-                </StackPanel>
-            </Border>
-
-            <!-- Ustawienia -->
-            <Border Classes="card">
-                <StackPanel Spacing="12">
-                    <StackPanel Classes="sectionHeader">
-                        <TextBlock Classes="icon" Text="&#xE713;" />
-                        <TextBlock Text="USTAWIENIA" />
-                    </StackPanel>
-                    <views:SettingRow Title="Nazwa tego komputera" Subtitle="Widoczna w aplikacji na Macu.">
-                        <TextBox Text="{Binding DeviceName}" Width="200" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-                    <views:SettingRow Title="Port TCP Maca" Subtitle="Domyślnie 47800 – musi zgadzać się z ustawieniem na Macu.">
-                        <TextBox Text="{Binding ControlPortText}" Width="90" />
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-                    <views:SettingRow Title="Port UDP audio (ten komputer)" Subtitle="Domyślnie 47802. Zapora Windows musi go przepuszczać.">
-                        <TextBox Text="{Binding AudioPortText}" Width="90" />
-                    </views:SettingRow>
-                </StackPanel>
-            </Border>
-
-            <!-- Aktualizacje -->
-            <Border Classes="card">
-                <StackPanel Spacing="12">
-                    <StackPanel Classes="sectionHeader">
-                        <TextBlock Classes="icon" Text="&#xE896;" />
-                        <TextBlock Text="AKTUALIZACJE" />
-                    </StackPanel>
-                    <views:SettingRow Title="{Binding VersionLabel}" Subtitle="{Binding UpdateStatusText}">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <ProgressBar IsIndeterminate="True" Width="120" Height="4" IsVisible="{Binding IsCheckingUpdates}" />
-                            <ProgressBar Minimum="0" Maximum="1" Value="{Binding UpdateProgress}" Width="120" Height="4" IsVisible="{Binding IsInstallingUpdate}" />
-                            <Button Content="Sprawdź teraz" Command="{Binding CheckUpdatesCommand}" IsVisible="{Binding !UpdateAvailable}" />
-                            <Button Classes="accent" Content="Zainstaluj" Command="{Binding InstallUpdateCommand}" IsVisible="{Binding UpdateAvailable}" />
-                        </StackPanel>
-                    </views:SettingRow>
-                    <Rectangle Classes="divider" />
-                    <views:SettingRow Title="Sprawdzaj automatycznie" Subtitle="Po starcie i co 6 godzin, przez GitHub Releases.">
-                        <ToggleSwitch Classes="compact" IsChecked="{Binding AutoCheckUpdates}" />
-                    </views:SettingRow>
-                </StackPanel>
-            </Border>
-
-            <!-- Dziennik -->
-            <Border Classes="card">
-                <StackPanel Spacing="10">
-                    <Grid ColumnDefinitions="*,Auto">
-                        <StackPanel Classes="sectionHeader" VerticalAlignment="Center">
-                            <TextBlock Classes="icon" Text="&#xE7C3;" />
-                            <TextBlock Text="DZIENNIK" />
-                        </StackPanel>
-                        <Button Grid.Column="1" Content="Wyczyść" Command="{Binding ClearLogCommand}" FontSize="12" Padding="10,4" />
-                    </Grid>
-                    <ItemsControl ItemsSource="{Binding LogLines}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="x:String">
-                                <TextBlock Classes="mono" Text="{Binding}" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </Border>
-
-        </StackPanel>
-    </ScrollViewer>
+        </ui:NavigationView>
+    </Grid>
 </wnd:AppWindow>
