@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.2 — 2026-09-04
+
+### Fixed
+
+- Windows: audio never started since 2.0.0. The control socket is dual-stack, so an IPv4 Mac is
+  reported as `::ffff:192.168.x.y`, and the source-address check added in 2.0.0 rejected it with
+  "Cannot open UDP port: cannot determine the Mac IPv4 address". `AUDIO_START` was therefore never
+  sent, which is also why macOS never asked for the audio permission. Mapped addresses are now
+  normalized to IPv4, and a genuine IPv6 session says so instead of hiding behind a parameter name.
+
 ## 2.0.1 — 2026-09-04
 
 ### Fixed

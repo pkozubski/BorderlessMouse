@@ -37,8 +37,16 @@ public sealed class AudioReceiver : IDisposable
     public int Start(int port, string expectedAddress, ReadOnlySpan<byte> key, ulong sessionId)
     {
         Stop();
-        if (!IPAddress.TryParse(expectedAddress, out var address) || address.AddressFamily != AddressFamily.InterNetwork)
+        if (!IPAddress.TryParse(expectedAddress, out var address))
             throw new ArgumentException(T("Nie można ustalić adresu IPv4 Maca.", "Cannot determine the Mac IPv4 address."), nameof(expectedAddress));
+        // Gniazdo sterowania jest dual-stack, więc Mac w IPv4 potrafi przyjść
+        // jako adres zmapowany (::ffff:192.168.x.y) – to nadal ten sam host.
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != AddressFamily.InterNetwork)
+            throw new ArgumentException(
+                T($"Sesja zestawiona po IPv6 ({expectedAddress}); dźwięk wymaga adresu IPv4 Maca.",
+                  $"The session uses IPv6 ({expectedAddress}); audio requires the Mac IPv4 address."),
+                nameof(expectedAddress));
         if (key.Length != 32) throw new ArgumentException(T("Nieprawidłowy klucz sesji audio.", "Invalid audio-session key."), nameof(key));
 
         var udp = new UdpClient(AddressFamily.InterNetwork);
@@ -92,7 +100,8 @@ public sealed class AudioReceiver : IDisposable
             catch (SocketException) { if (!_running) break; continue; }
             catch (ObjectDisposedException) { break; }
 
-            if (_expectedAddress is null || !remote.Address.Equals(_expectedAddress))
+            var source = remote.Address.IsIPv4MappedToIPv6 ? remote.Address.MapToIPv4() : remote.Address;
+            if (_expectedAddress is null || !source.Equals(_expectedAddress))
             {
                 Interlocked.Increment(ref PacketsRejected);
                 continue;

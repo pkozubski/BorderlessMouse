@@ -66,7 +66,7 @@ public sealed class ControlClient : IDisposable
             _pairingKey = pairingKey.ToArray();
             _clientNonce = nonce;
             _disconnectSignalled = 0;
-            RemoteAddress = ((System.Net.IPEndPoint)tcp.Client.RemoteEndPoint!).Address.ToString();
+            RemoteAddress = NormalizeAddress(((System.Net.IPEndPoint)tcp.Client.RemoteEndPoint!).Address).ToString();
         }
 
         _ = Task.Run(() => WriterLoop(_stream!, outbox.Reader, cts.Token));
@@ -75,6 +75,14 @@ public sealed class ControlClient : IDisposable
         _ = Task.Run(() => HandshakeTimeoutAsync(cts.Token));
         SendRaw(Frame.Hello(localName, nonce));
     }
+
+    /// <summary>
+    /// Gniazdo TCP bez podanej rodziny adresów jest w .NET dual-stack, więc dla
+    /// Maca w IPv4 zwraca adres zmapowany (::ffff:192.168.x.y). Audio i logi
+    /// potrzebują zwykłego IPv4, inaczej odbiornik UDP odrzuca sesję.
+    /// </summary>
+    public static System.Net.IPAddress NormalizeAddress(System.Net.IPAddress address)
+        => address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
 
     public void Disconnect(string? reason)
     {

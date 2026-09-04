@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Reflection;
 using System.Text;
@@ -59,6 +61,7 @@ internal static class Program
     private static async Task RunChecks()
     {
         RunSecurityChecks();
+        RunAudioSessionChecks();
         using var fixture = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "clipboard.json")));
         string Field(string name) => fixture.RootElement.GetProperty(name).GetString()!;
         var png = Convert.FromBase64String(Field("pngBase64"));
@@ -225,6 +228,53 @@ internal static class Program
         Expect(!UpdateSignatureVerifier.VerifyData(updateVector, updateSignature), "tampered release artifact rejected");
         Expect(!UpdateSignatureVerifier.VerifyData(Encoding.UTF8.GetBytes("BorderlessMouse updater signature test vector v1"), updateSignature[..^1]), "truncated release signature rejected");
         Console.WriteLine("✓ Security: pairing, encrypted sessions, replay protection and signed update artifacts");
+    }
+
+    /// <summary>
+    /// Regresja: gniazdo sterowania jest dual-stack, więc Mac w IPv4 zgłasza się
+    /// jako ::ffff:a.b.c.d. Odbiornik audio musi to przyjąć, bo inaczej Windows
+    /// nigdy nie wyśle AUDIO_START i Mac nawet nie spyta o zgodę na dźwięk.
+    /// </summary>
+    private static void RunAudioSessionChecks()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            using var probe = new TcpClient { NoDelay = true };
+            probe.Connect(IPAddress.Loopback, ((IPEndPoint)listener.LocalEndpoint).Port);
+            var raw = ((IPEndPoint)probe.Client.RemoteEndPoint!).Address;
+            // Na hoście z IPv6 wychodzi ::ffff:127.0.0.1; bez IPv6 zwykłe 127.0.0.1.
+            Console.WriteLine($"  peer address as reported by the socket: {raw} ({raw.AddressFamily})");
+            Expect(ControlClient.NormalizeAddress(raw).Equals(IPAddress.Loopback), "peer address is normalized to IPv4");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+
+        var v4 = IPAddress.Parse("192.168.1.6");
+        Expect(ControlClient.NormalizeAddress(v4).Equals(v4), "plain IPv4 peer address is left alone");
+
+        var key = Enumerable.Repeat((byte)0x5A, 32).ToArray();
+        using var receiver = new AudioReceiver();
+        var port = receiver.Start(0, "::ffff:127.0.0.1", key, 1);
+        Expect(port > 0, "audio receiver accepts an IPv4-mapped Mac address");
+        receiver.Stop();
+        Expect(receiver.Start(0, "127.0.0.1", key, 1) > 0, "audio receiver accepts a plain IPv4 Mac address");
+        receiver.Stop();
+
+        var ipv6 = Assert<ArgumentException>(() => receiver.Start(0, "fe80::1", key, 1));
+        Expect(ipv6.Message.Contains("IPv6", StringComparison.Ordinal), "a genuine IPv6 session reports why audio cannot start");
+        Assert<ArgumentException>(() => receiver.Start(0, "not-an-address", key, 1));
+        Console.WriteLine("✓ Audio session: IPv4-mapped peer addresses accepted, IPv6-only sessions reported clearly");
+    }
+
+    private static T Assert<T>(Action action) where T : Exception
+    {
+        try { action(); }
+        catch (T expected) { return expected; }
+        throw new InvalidOperationException($"expected {typeof(T).Name}");
     }
 }
 
