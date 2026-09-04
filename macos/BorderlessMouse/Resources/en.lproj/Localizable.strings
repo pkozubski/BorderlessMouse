@@ -96,6 +96,8 @@
 "Sprawdź aktualizacje…" = "Check for updates…";
 "Zakończ" = "Quit";
 "macOS zapyta przy pierwszym streamie. Ustawienia → Prywatność → Nagrywanie ekranu i dźwięku systemowego." = "macOS asks on the first stream. System Settings → Privacy & Security → Screen & System Audio Recording.";
+"Sprawdź" = "Check";
+"Napraw zgodę" = "Repair";
 "Klawiatura i mysz" = "Keyboard and mouse";
 "128 ramek (~2,7 ms)" = "128 frames (~2.7 ms)";
 "256 ramek (~5,3 ms)" = "256 frames (~5.3 ms)";

@@ -42,6 +42,25 @@ final class SystemAudioTap {
         }
     }
 
+    /// Stan zgody TCC „nagrywanie dźwięku systemowego”. macOS nie ma API do
+    /// odpytania jej wprost – jedyny wiarygodny test to spróbować założyć tap.
+    enum Permission: Equatable {
+        case unknown
+        case checking
+        case granted
+        case denied(String)
+        case failed(String)
+
+        var isGranted: Bool { if case .granted = self { return true }; return false }
+
+        var message: String? {
+            switch self {
+            case let .denied(m), let .failed(m): return m
+            case .unknown, .checking, .granted: return nil
+            }
+        }
+    }
+
     /// Wołane na wątku audio. `frames` ramek interleaved Int16.
     var onSamples: ((UnsafePointer<Int16>, Int) -> Void)?
     /// Poziom szczytowy 0–1 (wątek audio).
@@ -272,6 +291,36 @@ final class SystemAudioTap {
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr, queue) { [weak self] _, _ in
             guard let self, self.isRunning else { return }
             self.onDefaultDeviceChanged?()
+        }
+    }
+}
+
+// MARK: - Zgoda na nagrywanie dźwięku systemowego
+
+extension SystemAudioTap {
+    /// Czy błąd Core Audio oznacza brak zgody TCC, a nie usterkę sprzętu.
+    static func isPermissionDenied(_ status: OSStatus) -> Bool {
+        status == kAudioHardwareIllegalOperationError || status == kAudioDevicePermissionsError
+    }
+
+    static func permission(for error: Error) -> Permission {
+        if case let TapError.osStatus(status, _) = error, isPermissionDenied(status) {
+            return .denied(error.localizedDescription)
+        }
+        return .failed(error.localizedDescription)
+    }
+
+    /// Zakłada i natychmiast niszczy tap, żeby sprawdzić zgodę – a gdy jej nie
+    /// ma, wywołać systemowe okno pytania. Blokuje wątek do czasu decyzji
+    /// użytkownika, więc wolno to wołać tylko z kolejki roboczej.
+    static func probePermission() -> Permission {
+        let tap = SystemAudioTap()
+        defer { tap.stop() }
+        do {
+            try tap.start(muteLocal: false, bufferFrames: 512)
+            return .granted
+        } catch {
+            return permission(for: error)
         }
     }
 }

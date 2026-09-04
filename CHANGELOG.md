@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- macOS: the Permissions page now really checks the system-audio-recording consent instead of
+  mirroring the streaming state, so it no longer reports "missing" whenever no stream is running.
+- macOS: added **Request** — the app can trigger the consent prompt itself, without waiting for a
+  Windows peer to start a stream.
+- macOS: added **Repair**, which clears a stale TCC entry
+  (`tccutil reset AudioCapture com.borderlessmouse.mac`) and asks again. Needed when System
+  Settings shows the permission as granted but macOS denies it, which happens after the app's
+  code signature changes (ad-hoc local build ↔ signed release).
+
 ## 2.0.0 — 2026-09-03 — free beta
 
 ### Security

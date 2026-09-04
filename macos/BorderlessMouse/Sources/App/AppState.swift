@@ -35,6 +35,7 @@ final class AppState: ObservableObject {
     @Published private(set) var audioLevel: Float = 0
     @Published private(set) var audioPackets: UInt64 = 0
     @Published private(set) var audioSendErrors: UInt64 = 0
+    @Published private(set) var audioPermission: SystemAudioTap.Permission = .unknown
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var clipboardStatus = L10n.text("Brak synchronizacji w tej sesji", "No synchronization in this session")
     @Published private(set) var loginItemStatus = LoginItem.statusDescription
@@ -46,6 +47,8 @@ final class AppState: ObservableObject {
     let engine: Engine
     let updater = Updater()
     private var permissionTimer: Timer?
+    private var audioPermissionInFlight = false
+    private var audioPermissionCheckedAt: Date?
     private var updateTimer: Timer?
     private var updaterSink: AnyCancellable?
     private let logger = Logger(subsystem: "com.borderlessmouse.mac", category: "app")
@@ -114,6 +117,7 @@ final class AppState: ObservableObject {
         cursorOnMac = true
         accessibilityGranted = true
         audioStreaming = true
+        audioPermission = .granted
         audioDescription = "48000 Hz · stereo · 16-bit → 192.168.1.42:47802"
         audioLevel = 0.42
         audioPackets = 18_432
@@ -188,6 +192,127 @@ final class AppState: ObservableObject {
         open("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
     }
 
+    // MARK: - Zgoda na dźwięk systemowy
+
+    /// `nil` = jeszcze nie wiadomo (nie sprawdzaliśmy albo trwa sprawdzanie).
+    var audioPermissionGranted: Bool? {
+        switch audioPermission {
+        case .granted: return true
+        case .denied, .failed: return false
+        case .unknown, .checking: return nil
+        }
+    }
+
+    var audioPermissionSubtitle: String {
+        switch audioPermission {
+        case .granted:
+            return L10n.text("Nadane – Mac może wysyłać dźwięk systemowy.",
+                             "Granted — the Mac can stream system audio.")
+        case .checking:
+            return L10n.text("Sprawdzanie… jeśli macOS zapyta, potwierdź zgodę.",
+                             "Checking… confirm the macOS prompt if it appears.")
+        case .unknown:
+            return L10n.text("Kliknij „Poproś”, żeby sprawdzić zgodę i w razie potrzeby wywołać pytanie macOS.",
+                             "Press “Request” to check the permission and trigger the macOS prompt if needed.")
+        case let .denied(message):
+            return L10n.text("Brak zgody: \(message) Jeśli w Ustawieniach systemowych przełącznik jest włączony, użyj „Napraw zgodę” – po zmianie podpisu aplikacji macOS trzyma stary wpis.",
+                             "Not granted: \(message) If the switch is already on in System Settings, use “Repair” — macOS keeps a stale entry after the app signature changes.")
+        case let .failed(message):
+            return L10n.text("Nie udało się sprawdzić: \(message)", "Could not verify: \(message)")
+        }
+    }
+
+    /// Jedyny sposób na sprawdzenie tej zgody to spróbować założyć tap – przy
+    /// braku wpisu w TCC macOS pokaże wtedy pytanie.
+    func checkAudioPermission(force: Bool) {
+        guard !isPreview else { return }
+        if audioStreaming {
+            applyAudioPermission(.granted)
+            return
+        }
+        guard !audioPermissionInFlight else { return }
+        if !force {
+            // automatyczny test może wywołać systemowe pytanie – nigdy w tle
+            // (np. przy starcie z logowania z ukrytym oknem)
+            guard settings.audioEnabled, NSApp.isActive else { return }
+            if audioPermission.isGranted, let last = audioPermissionCheckedAt,
+               Date().timeIntervalSince(last) < 30 { return }
+        }
+        audioPermissionInFlight = true
+        audioPermission = .checking
+        engine.probeAudioPermission { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                self.audioPermissionInFlight = false
+                self.audioPermissionCheckedAt = Date()
+                self.applyAudioPermission(result)
+            }
+        }
+    }
+
+    /// Kasuje wpis TCC dla tej aplikacji i od razu prosi o zgodę na nowo.
+    /// Potrzebne, gdy Ustawienia systemowe pokazują zgodę, a macOS jej nie
+    /// honoruje (wpis pamięta poprzedni podpis aplikacji).
+    func repairAudioPermission() {
+        guard !isPreview, !audioPermissionInFlight else { return }
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.borderlessmouse.mac"
+        appendLog(L10n.text("Kasowanie wpisu zgody na dźwięk (tccutil reset AudioCapture \(bundleID))",
+                            "Resetting the audio permission entry (tccutil reset AudioCapture \(bundleID))"))
+        audioPermissionInFlight = true
+        audioPermission = .checking
+        DispatchQueue.global(qos: .userInitiated).async {
+            let message = Self.runTccutilReset(bundleID: bundleID)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.audioPermissionInFlight = false
+                if let message { self.appendLog(message) }
+                self.audioPermission = .unknown
+                self.checkAudioPermission(force: true)
+            }
+        }
+    }
+
+    /// Zwraca komunikat do dziennika, gdy reset się nie powiódł.
+    private nonisolated static func runTccutilReset(bundleID: String) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        task.arguments = ["reset", "AudioCapture", bundleID]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = pipe
+        do {
+            try task.run()
+            let output = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            guard task.terminationStatus != 0 else { return nil }
+            let text = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return L10n.text("tccutil zakończył się kodem \(task.terminationStatus): \(text)",
+                             "tccutil exited with code \(task.terminationStatus): \(text)")
+        } catch {
+            return L10n.text("Nie udało się uruchomić tccutil: \(error.localizedDescription)",
+                             "Could not run tccutil: \(error.localizedDescription)")
+        }
+    }
+
+    private func applyAudioPermission(_ value: SystemAudioTap.Permission) {
+        guard audioPermission != value else { return }
+        let wasGranted = audioPermission.isGranted
+        audioPermission = value
+        switch value {
+        case .granted where !wasGranted:
+            appendLog(L10n.text("Zgoda na nagrywanie dźwięku systemowego nadana",
+                                "System audio recording permission granted"))
+        case let .denied(message):
+            appendLog(L10n.text("Brak zgody na nagrywanie dźwięku systemowego: \(message)",
+                                "System audio recording permission missing: \(message)"))
+        case let .failed(message):
+            appendLog(L10n.text("Test dźwięku nie powiódł się: \(message)",
+                                "Audio permission test failed: \(message)"))
+        default:
+            break
+        }
+    }
+
     func disconnectPeer() { engine.disconnectPeer() }
     func stopAudio() { engine.stopAudio() }
     func restartServer() { engine.restartServer() }
@@ -253,6 +378,9 @@ final class AppState: ObservableObject {
         case let .audioError(message):
             audioStreaming = false
             audioError = message
+        case let .audioPermission(value):
+            audioPermissionCheckedAt = Date()
+            applyAudioPermission(value)
         case let .audioLevel(level):
             audioLevel = level
         case let .audioStats(packets, errors):

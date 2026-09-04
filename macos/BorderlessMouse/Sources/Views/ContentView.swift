@@ -350,15 +350,30 @@ struct PermissionsPage: View {
             }
             Section("Dźwięk") {
                 SettingRow(title: "Nagrywanie dźwięku systemowego",
-                           subtitle: "macOS zapyta przy pierwszym streamie. Ustawienia → Prywatność → Nagrywanie ekranu i dźwięku systemowego.") {
+                           subtitle: state.audioPermissionSubtitle) {
                     HStack(spacing: 8) {
-                        StatusDot(ok: state.audioStreaming ? true : (state.audioError == nil ? nil : false))
-                        Button("Ustawienia") { state.openAudioCaptureSettings() }
+                        if case .checking = state.audioPermission {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            StatusDot(ok: state.audioPermissionGranted)
+                        }
+                        if state.audioPermission.isGranted {
+                            Text("OK").foregroundStyle(.secondary)
+                            Button("Sprawdź") { state.checkAudioPermission(force: true) }
+                        } else {
+                            Button("Poproś") { state.checkAudioPermission(force: true) }
+                            if state.audioPermissionGranted == false {
+                                Button("Napraw zgodę") { state.repairAudioPermission() }
+                            }
+                            Button("Ustawienia") { state.openAudioCaptureSettings() }
+                        }
                     }
+                    .disabled({ if case .checking = state.audioPermission { return true }; return false }())
                 }
             }
         }
         .formStyle(.grouped)
+        .onAppear { state.checkAudioPermission(force: false) }
     }
 }
 

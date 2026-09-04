@@ -26,6 +26,7 @@ final class Engine {
         case audioStarted(String)
         case audioStopped
         case audioError(String)
+        case audioPermission(SystemAudioTap.Permission)
         case audioLevel(Float)
         case audioStats(packets: UInt64, errors: UInt64)
         case clipboardSent(summary: String)
@@ -154,6 +155,18 @@ final class Engine {
 
     func stopAudio() {
         eventsQueue.async { self.stopAudioLocked(notify: true) }
+    }
+
+    /// Sprawdza (i w razie potrzeby wywołuje) zgodę na nagrywanie dźwięku
+    /// systemowego. Gdy stream już leci, zgoda jest oczywista – nie ruszamy tapu.
+    func probeAudioPermission(completion: @escaping (SystemAudioTap.Permission) -> Void) {
+        eventsQueue.async {
+            if self.tap != nil {
+                completion(.granted)
+                return
+            }
+            self.audioQueue.async { completion(SystemAudioTap.probePermission()) }
+        }
     }
 
     // MARK: - Okablowanie
@@ -320,6 +333,7 @@ final class Engine {
                     let desc = "\(Int(format.sampleRate)) Hz · \(channelDescription) · 16-bit → \(host):\(port)"
                     self.server.send(Frame.audioFormat(sampleRate: UInt32(format.sampleRate), channels: UInt8(format.channels),
                                                        format: .int16, status: 0, message: ""))
+                    self.emit(.audioPermission(.granted))
                     self.emit(.audioStarted(desc))
                     self.emit(.log(L10n.text("Audio: \(desc), bufor \(cfg.audioBufferFrames) ramek",
                                              "Audio: \(desc), \(cfg.audioBufferFrames)-frame buffer")))
@@ -329,9 +343,11 @@ final class Engine {
             } catch {
                 tap.stop()
                 let message = error.localizedDescription
+                let permission = SystemAudioTap.permission(for: error)
                 self?.eventsQueue.async {
                     guard let self, self.audioGeneration == generation else { return }
                     self.server.send(Frame.audioFormat(sampleRate: 0, channels: 0, format: .int16, status: 1, message: message))
+                    self.emit(.audioPermission(permission))
                     self.emit(.audioError(message))
                     self.emit(.log(L10n.text("Błąd audio: \(message)", "Audio error: \(message)")))
                     self.sendStatus()

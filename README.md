@@ -148,8 +148,13 @@ Zbudowana lokalnie aplikacja: `macos/build/BorderlessMouse.app` (po `./build.sh`
 1. Uruchom aplikację. Kreator pokaże kod parowania i stan gotowości Maca.
 2. W kreatorze lub karcie **Uprawnienia macOS** kliknij **Poproś** przy „Dostępność” i włącz
    BorderlessMouse w *Ustawienia systemowe → Prywatność i ochrona → Dostępność*.
-3. Przy pierwszym streamie audio macOS zapyta o **nagrywanie dźwięku systemowego** – zgódź się
-   (*Prywatność i ochrona → Nagrywanie ekranu i dźwięku systemowego*).
+3. Na karcie **Uprawnienia** kliknij **Poproś** przy „Nagrywanie dźwięku systemowego” – macOS
+   zapyta o zgodę (*Prywatność i ochrona → Nagrywanie ekranu i dźwięku systemowego*). To samo
+   pytanie pojawia się przy pierwszym streamie audio.
+   Jeśli przełącznik w Ustawieniach systemowych jest włączony, a aplikacja i tak nie dostaje
+   dźwięku (typowo po zmianie podpisu aplikacji, np. po przejściu z lokalnego builda na wydanie
+   z GitHuba), kliknij **Napraw zgodę** – kasuje to zdezaktualizowany wpis
+   (`tccutil reset AudioCapture com.borderlessmouse.mac`) i pyta o zgodę na nowo.
 4. Na macOS 15+ może pojawić się pytanie o **Sieć lokalną** – również zgódź się.
 5. Jeśli zapora macOS jest włączona, zezwól na połączenia przychodzące.
 
