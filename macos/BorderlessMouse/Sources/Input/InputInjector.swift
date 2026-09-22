@@ -87,6 +87,10 @@ final class InputInjector {
         setVirtualFocus(currentDisplay.id == virtualDisplayID && virtualDisplayID != nil)
     }
 
+    private func isVirtual(_ display: Display) -> Bool {
+        virtualDisplayID != nil && display.id == virtualDisplayID
+    }
+
     private func setVirtualFocus(_ focused: Bool) {
         guard focused != isOnVirtualDisplay else { return }
         isOnVirtualDisplay = focused
@@ -139,7 +143,21 @@ final class InputInjector {
     func moveBy(dx: Int, dy: Int) {
         guard isActive else { return }
         let candidate = CGPoint(x: position.x + CGFloat(dx), y: position.y + CGFloat(dy))
-        if let d = displays.first(where: { $0.bounds.contains(candidate) }) {
+        if let d = displays.first(where: { $0.bounds.contains(candidate) }),
+           isVirtual(d), !isVirtual(currentDisplay), buttonsDown.isEmpty {
+            // Ekran wirtualny stoi między Makiem a Windowsem. Wchodzi się na niego tylko,
+            // przeciągając okno (przycisk wciśnięty); zwykły ruch wraca prosto do Windowsa.
+            let b = currentDisplay.bounds
+            let ratio: Float
+            switch returnEdge {
+            case .left, .right: ratio = Float((position.y - b.minY) / max(b.height - 1, 1))
+            case .top, .bottom: ratio = Float((position.x - b.minX) / max(b.width - 1, 1))
+            }
+            let edge = returnEdge
+            deactivate()
+            onLeave?(edge, min(max(ratio, 0), 1), false)
+            return
+        } else if let d = displays.first(where: { $0.bounds.contains(candidate) }) {
             currentDisplay = d
             position = candidate
             setVirtualFocus(d.id == virtualDisplayID && virtualDisplayID != nil)

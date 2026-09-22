@@ -47,6 +47,7 @@ public static class NativeMethods
     public const int VK_SCROLL = 0x91;
     public const int VK_PAUSE = 0x13;
     public const int VK_F12 = 0x7B;
+    public const int VK_B = 0x42;
 
     // okna / raw input
     public const uint WS_POPUP = 0x80000000;

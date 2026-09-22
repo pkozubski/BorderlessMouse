@@ -144,7 +144,9 @@ dekodera i przy każdym pokazaniu okna.
 
 `DISPLAY_FOCUS` mówi, że kursor sterowany z Windowsa jest na ekranie wirtualnym: Windows
 pokazuje wtedy obraz Maca na całym monitorze. Kursor z Windowsa wchodzi zawsze na fizyczny
-ekran Maca; na ekran wirtualny przechodzi dopiero z niego. Wyjście przez dalszą krawędź
+ekran Maca; na ekran wirtualny przechodzi dopiero z niego i tylko podczas przeciągania
+(wciśnięty przycisk myszy). Zwykły ruch przez tę krawędź oddaje sterowanie Windowsowi
+(`LEAVE` bez bitu 0), jak bez ekranu wirtualnego. Wyjście przez dalszą krawędź
 ekranu wirtualnego oddaje sterowanie Windowsowi (`LEAVE` z bitem 0), a kursor Windows
 pojawia się przy tej samej krawędzi monitora.
 

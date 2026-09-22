@@ -171,7 +171,8 @@ Aplikacja ma też ikonę w pasku menu z szybkimi przełącznikami.
    konta Windows i nie trafia do zwykłego pliku ustawień.
 3. Mac pojawi się na liście **Maki w sieci lokalnej** – wybierz go (albo wpisz IP) i **Połącz**.
 4. Ustaw, po której stronie ekranu stoi Mac (domyślnie *po lewej*) oraz wybierz skrót
-   awaryjny: **Scroll Lock**, **Pause/Break** albo **F12**.
+   awaryjny: **Scroll Lock**, **Pause/Break**, **F12** albo **Ctrl + Alt + Shift + B**
+   (dla klawiatur 60–75% bez Scroll Lock i Pause).
 5. Przesuń mysz przez tę krawędź – kursor przechodzi na Maca, a kursor Windows zostaje
    (ukryty) w miejscu przekroczenia. Ruch myszy jest czytany przez Raw Input, więc nie ma
    akceleracji Windows; tempo dostroisz suwakiem „Czułość myszy na Macu”. Powrót: przesuń
@@ -201,8 +202,9 @@ Jak z tego korzystać:
 2. Połącz Windows z Makiem. Windows sam poprosi o ekran – na Macu pojawi się nowy monitor
    „BorderlessMouse”, widoczny też w *Ustawienia systemowe → Wyświetlacze*.
 3. Przejdź kursorem z Windowsa na Maca jak zwykle (kursor trafia na ekran MacBooka).
-4. Przeciągnij okno dalej w stronę Windowsa: gdy kursor wejdzie na ekran wirtualny, monitor
-   Windowsa pokaże pulpit Maca z tym oknem.
+4. **Przeciągnij okno** (z wciśniętym przyciskiem myszy) przez krawędź w stronę Windowsa:
+   monitor Windowsa pokaże pulpit Maca z tym oknem. Zwykły ruch kursora bez przeciągania
+   wraca prosto do Windowsa, jak wcześniej.
 5. Dalsza krawędź ekranu wirtualnego (albo skrót awaryjny) wraca do Windowsa – obraz Maca
    znika, a kursor Windows pojawia się tam, gdzie był na obrazie.
 

@@ -17,6 +17,10 @@
   `--display-selftest` diagnostic.
 - Windows: "Mac display" card with a toggle, "show it whenever you control the Mac" option,
   status, throughput and restart.
+- The virtual display is entered only while dragging (a mouse button is held); plain pointer
+  movement across that edge still returns to Windows.
+- Windows: `Ctrl + Alt + Shift + B` emergency shortcut for compact keyboards without
+  Scroll Lock or Pause.
 - Shared test vectors (CryptoKit ↔ .NET) and an H.264 fixture encoded on macOS that the Windows
   checks decrypt and, on Windows, decode.
 

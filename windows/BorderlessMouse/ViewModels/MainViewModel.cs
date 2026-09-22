@@ -24,7 +24,7 @@ public sealed record MacSideOption(MacSide Value, string Label)
     public override string ToString() => Label;
 }
 
-public sealed record EmergencyHotkeyOption(EmergencyHotkey Value, ushort VirtualKey, string Label)
+public sealed record EmergencyHotkeyOption(EmergencyHotkey Value, ushort VirtualKey, string Label, bool WithModifiers = false)
 {
     public override string ToString() => Label;
 }
@@ -85,6 +85,7 @@ public partial class MainViewModel : ObservableObject
             new EmergencyHotkeyOption(EmergencyHotkey.ScrollLock, NativeMethods.VK_SCROLL, "Scroll Lock"),
             new EmergencyHotkeyOption(EmergencyHotkey.Pause, NativeMethods.VK_PAUSE, "Pause / Break"),
             new EmergencyHotkeyOption(EmergencyHotkey.F12, NativeMethods.VK_F12, "F12"),
+            new EmergencyHotkeyOption(EmergencyHotkey.CtrlAltShiftB, NativeMethods.VK_B, "Ctrl + Alt + Shift + B", WithModifiers: true),
         };
 
         _hostAddress = _settings.HostAddress;
@@ -690,6 +691,7 @@ public partial class MainViewModel : ObservableObject
         _capture.Enabled = InputSharingEnabled;
         _capture.Side = SelectedMacSide.Value;
         _capture.EmergencyVirtualKey = SelectedEmergencyHotkey.VirtualKey;
+        _capture.EmergencyRequiresModifiers = SelectedEmergencyHotkey.WithModifiers;
         _capture.HideCursorWhileRemote = HideCursorWhileRemote;
         _capture.RemoteMouseSpeed = RemoteMouseSpeed;
         ApplyHookState();
@@ -1065,7 +1067,11 @@ public partial class MainViewModel : ObservableObject
     {
         _settings.EmergencyHotkey = value.Value;
         SaveSettings();
-        if (_capture is not null) _capture.EmergencyVirtualKey = value.VirtualKey;
+        if (_capture is not null)
+        {
+            _capture.EmergencyVirtualKey = value.VirtualKey;
+            _capture.EmergencyRequiresModifiers = value.WithModifiers;
+        }
     }
 
     partial void OnAudioEnabledChanged(bool value)

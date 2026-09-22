@@ -36,6 +36,8 @@ public sealed class InputCapture : IDisposable
     public MacSide Side { get; set; } = MacSide.Left;
     /// <summary>Klawisz, który zawsze ręcznie oddaje lub przejmuje sterowanie.</summary>
     public ushort EmergencyVirtualKey { get; set; } = VK_SCROLL;
+    /// <summary>Skrót działa tylko z wciśniętymi Ctrl, Alt i Shift (klawiatury bez Scroll Lock).</summary>
+    public bool EmergencyRequiresModifiers { get; set; }
     /// <summary>Ukrywaj kursor Windows podczas sterowania Makiem.</summary>
     public bool HideCursorWhileRemote { get; set; } = true;
     /// <summary>Mnożnik surowych delt myszy (Raw Input nie ma akceleracji Windows).</summary>
@@ -346,7 +348,8 @@ public sealed class InputCapture : IDisposable
         var scan = (ushort)d.scanCode;
         var ext = (d.flags & LLKHF_EXTENDED) != 0;
 
-        if (vk == EmergencyVirtualKey && Enabled && _client.IsConnected)
+        if (vk == EmergencyVirtualKey && Enabled && _client.IsConnected
+            && (!EmergencyRequiresModifiers || EmergencyModifiersHeld()))
         {
             if (down) Toggle();
             return true;
@@ -359,6 +362,13 @@ public sealed class InputCapture : IDisposable
         if (!IsRemote) return false;
         _client.SendKey(scan, vk, ext, down, repeat);
         return true;
+    }
+
+    /// <summary>Ctrl, Alt i Shift wciśnięte (lewe lub prawe) – według stanu śledzonego przez hook.</summary>
+    private bool EmergencyModifiersHeld()
+    {
+        bool Held(params ushort[] codes) => _keysDown.Any(k => codes.Contains(k.vk));
+        return Held(0xA2, 0xA3, 0x11) && Held(0xA4, 0xA5, 0x12) && Held(0xA0, 0xA1, 0x10);
     }
 
     /// <summary>

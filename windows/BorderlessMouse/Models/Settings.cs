@@ -17,6 +17,8 @@ public enum EmergencyHotkey
     ScrollLock,
     Pause,
     F12,
+    /// <summary>Dla klawiatur bez Scroll Lock i Pause (np. 60–75%).</summary>
+    CtrlAltShiftB,
 }
 
 public sealed class Settings
