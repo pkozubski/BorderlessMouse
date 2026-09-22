@@ -51,21 +51,45 @@ internal static class DisplayNative
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc callback, IntPtr data);
 
-    public const int RGN_OR = 2;
     public const int IDC_ARROW = 32512;
 
     [DllImport("user32.dll")]
     public static extern IntPtr LoadCursorW(IntPtr hInstance, IntPtr cursorName);
 
     [DllImport("gdi32.dll")]
-    public static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
-
-    [DllImport("gdi32.dll")]
-    public static extern int CombineRgn(IntPtr destination, IntPtr source1, IntPtr source2, int mode);
+    public static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);
 
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DeleteObject(IntPtr handle);
+
+    /// <summary>PNG jako zasób ikony (Windows Vista+).</summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreateIconFromResourceEx(byte[] data, uint size, [MarshalAs(UnmanagedType.Bool)] bool icon,
+        uint version, int width, int height, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(IntPtr icon);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetWindowTextW(IntPtr hWnd, string text);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+
+    public const uint GA_ROOT = 2;
 
     /// <summary>Po udanym wywołaniu system przejmuje uchwyt regionu.</summary>
     [DllImport("user32.dll")]

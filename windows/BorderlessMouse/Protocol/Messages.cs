@@ -44,6 +44,8 @@ public enum MessageType : byte
     WindowEnter = 0x32,
     WindowLeave = 0x33,
     WindowHandoff = 0x34,
+    WindowRaise = 0x35,
+    WindowClose = 0x36,
     AudioStart = 0x40,
     AudioStop = 0x41,
     AudioFormat = 0x42,
@@ -58,6 +60,7 @@ public enum MessageType : byte
     DisplayFocus = 0x84,
     DisplayMode = 0x85,
     DisplayWindows = 0x86,
+    WindowIcon = 0x87,
 }
 
 /// <summary>Tryb ekranu wirtualnego: cały pulpit albo same okna Maca na pulpicie Windows.</summary>
@@ -67,11 +70,17 @@ public enum DisplayMode : byte
     Windows = 1,
 }
 
-/// <summary>Prostokąt na ekranie wirtualnym w jednostkach 0…65535.</summary>
-public readonly record struct NormalizedRect(ushort X, ushort Y, ushort Width, ushort Height, byte Flags)
+/// <summary>Okno Maca na ekranie wirtualnym (piksele ekranu wirtualnego, może wystawać poza ekran).</summary>
+public sealed record MacWindow(uint Id, int Pid, int X, int Y, int Width, int Height, byte Flags, string Title)
 {
     public const byte MenuBar = 0x01;
+    public const byte Popup = 0x02;
+    public bool IsMenuBar => (Flags & MenuBar) != 0;
+    public bool IsPopup => (Flags & Popup) != 0;
 }
+
+/// <summary>Lista okien Maca od najwyższego, z rozmiarem ekranu wirtualnego w pikselach.</summary>
+public sealed record MacWindowList(int DisplayWidth, int DisplayHeight, IReadOnlyList<MacWindow> Windows);
 
 public enum ScreenEdge : byte
 {
@@ -290,6 +299,26 @@ public static class Frame
     public static byte[] DisplayStop() => Make(MessageType.DisplayStop, ReadOnlySpan<byte>.Empty);
     public static byte[] DisplayKeyframe() => Make(MessageType.DisplayKeyframe, ReadOnlySpan<byte>.Empty);
 
+    /// <summary>Klatka kluczowa jednego strumienia okna.</summary>
+    public static byte[] DisplayKeyframe(uint streamId)
+    {
+        Span<byte> p = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, streamId);
+        return Make(MessageType.DisplayKeyframe, p);
+    }
+
+    private static byte[] WindowCommand(MessageType type, uint id)
+    {
+        Span<byte> p = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, id);
+        return Make(type, p);
+    }
+
+    /// <summary>Okno Maca aktywowane na Windowsie – Mac wyciąga je na wierzch.</summary>
+    public static byte[] WindowRaise(uint id) => WindowCommand(MessageType.WindowRaise, id);
+    /// <summary>Alt+F4 / zamknięcie z paska zadań – Mac naciska przycisk zamknięcia okna.</summary>
+    public static byte[] WindowClose(uint id) => WindowCommand(MessageType.WindowClose, id);
+
     public static byte[] Ping(ulong ts)
     {
         Span<byte> p = stackalloc byte[8];
@@ -327,18 +356,32 @@ public static class Frame
 
     public static bool? ParseDisplayFocus(ReadOnlySpan<byte> p) => p.Length >= 1 ? p[0] != 0 : null;
 
-    public static List<NormalizedRect>? ParseDisplayWindows(ReadOnlySpan<byte> p)
+    public static MacWindowList? ParseDisplayWindows(ReadOnlySpan<byte> p)
     {
-        if (p.Length < 1 || p.Length != 1 + p[0] * 9) return null;
-        var rects = new List<NormalizedRect>(p[0]);
-        for (var i = 0; i < p[0]; i++)
+        if (p.Length < 5) return null;
+        var displayWidth = BinaryPrimitives.ReadUInt16LittleEndian(p);
+        var displayHeight = BinaryPrimitives.ReadUInt16LittleEndian(p[2..]);
+        int count = p[4], offset = 5;
+        var windows = new List<MacWindow>(count);
+        for (var i = 0; i < count; i++)
         {
-            var r = p.Slice(1 + i * 9, 9);
-            rects.Add(new NormalizedRect(BinaryPrimitives.ReadUInt16LittleEndian(r), BinaryPrimitives.ReadUInt16LittleEndian(r[2..]),
-                BinaryPrimitives.ReadUInt16LittleEndian(r[4..]), BinaryPrimitives.ReadUInt16LittleEndian(r[6..]), r[8]));
+            const int fixedBytes = 4 + 4 + 4 + 4 + 2 + 2 + 1 + 1;
+            if (p.Length < offset + fixedBytes) return null;
+            var r = p[offset..];
+            var titleLength = r[21];
+            if (p.Length < offset + fixedBytes + titleLength) return null;
+            windows.Add(new MacWindow(BinaryPrimitives.ReadUInt32LittleEndian(r), BinaryPrimitives.ReadInt32LittleEndian(r[4..]),
+                BinaryPrimitives.ReadInt32LittleEndian(r[8..]), BinaryPrimitives.ReadInt32LittleEndian(r[12..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(r[16..]), BinaryPrimitives.ReadUInt16LittleEndian(r[18..]),
+                r[20], Encoding.UTF8.GetString(r.Slice(fixedBytes, titleLength))));
+            offset += fixedBytes + titleLength;
         }
-        return rects;
+        return offset == p.Length && displayWidth > 0 && displayHeight > 0
+            ? new MacWindowList(displayWidth, displayHeight, windows) : null;
     }
+
+    public static (int pid, byte[] png)? ParseWindowIcon(ReadOnlySpan<byte> p)
+        => p.Length > 4 ? (BinaryPrimitives.ReadInt32LittleEndian(p), p[4..].ToArray()) : null;
 
     public static (ushort x, ushort y)? ParseWindowHandoff(ReadOnlySpan<byte> p)
         => p.Length >= 4 ? (BinaryPrimitives.ReadUInt16LittleEndian(p), BinaryPrimitives.ReadUInt16LittleEndian(p[2..])) : null;

@@ -283,9 +283,17 @@ internal static class Program
         Expect(Frame.SetDisplayMode(DisplayMode.Fullscreen).SequenceEqual(Hex("850100")), "DISPLAY_MODE");
         Expect(Frame.WindowEnter(0x1234, 0xFFFF).SequenceEqual(Hex("32043412ffff")) && Frame.MouseAbsolute(1, 2).SequenceEqual(Hex("130401000200"))
                && Frame.WindowLeave(true).SequenceEqual(Hex("330101")), "window input frames");
-        var windowsList = Frame.ParseDisplayWindows(Hex("01" + "0100" + "0200" + "0080" + "ffff" + "01"));
-        Expect(windowsList is [{ X: 1, Y: 2, Width: 0x8000, Height: 0xFFFF, Flags: NormalizedRect.MenuBar }], "DISPLAY_WINDOWS from the Mac layout");
-        Expect(Frame.ParseDisplayWindows(Hex("02" + "0100020000800000ff")) is null, "truncated DISPLAY_WINDOWS rejected");
+        var windowsPayload = Hex("8007380401040302014d000000f6ffffff14000000200358020203c48462");
+        var windowsList = Frame.ParseDisplayWindows(windowsPayload);
+        Expect(windowsList is { DisplayWidth: 1920, DisplayHeight: 1080, Windows: [{ Id: 0x01020304, Pid: 77, X: -10, Y: 20, Width: 800, Height: 600, IsPopup: true, Title: "Ąb" }] },
+            "DISPLAY_WINDOWS from the Mac layout");
+        Expect(Frame.ParseDisplayWindows(windowsPayload.AsSpan(0, windowsPayload.Length - 1)) is null, "truncated DISPLAY_WINDOWS rejected");
+        Expect(VideoStream.TryParseFrame(Hex("02012003580205000000000000000403020122000000000165"), out var windowFrame)
+               && windowFrame is { StreamId: 0x01020304, CornerRadius: 34, Width: 800, Height: 600, IsKeyframe: true } && windowFrame.Payload.Length == 5,
+            "window video frame from the Mac layout");
+        Expect(Frame.ParseWindowIcon(Hex("4d0000008950")) is { pid: 77 } icon && icon.png.SequenceEqual(new byte[] { 0x89, 0x50 }), "WINDOW_ICON");
+        Expect(Frame.WindowRaise(0x01020304).SequenceEqual(Hex("350404030201")) && Frame.WindowClose(7).SequenceEqual(Hex("360407000000"))
+               && Frame.DisplayKeyframe(0x01020304).SequenceEqual(Hex("830404030201")), "window commands");
         Expect(Frame.ParseWindowHandoff(Hex("3412ffff")) == (0x1234, 0xFFFF), "WINDOW_HANDOFF from the Mac layout");
         Expect(Frame.DisplayStop().SequenceEqual(Hex("8100")) && Frame.DisplayKeyframe().SequenceEqual(Hex("8300")), "display control frames");
 

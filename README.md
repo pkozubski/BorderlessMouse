@@ -209,16 +209,21 @@ Jak z tego korzystać:
 5. Dalsza krawędź ekranu wirtualnego (albo skrót awaryjny) wraca do Windowsa – obraz Maca
    znika, a kursor Windows pojawia się tam, gdzie był na obrazie.
 
-**Tryb okien** (domyślny, przełącznik „Tylko okna Maca” na Windowsie): zamiast całego
-pulpitu Windows pokazuje tylko okna Maca, które przeciągnąłeś na ekran wirtualny – leżą na
-pulpicie Windows obok zwykłych okien.
+**Tryb okien** (domyślny, przełącznik „Tylko okna Maca” na Windowsie): każde okno Maca,
+które przeciągniesz na ekran wirtualny, staje się zwykłym oknem Windows.
 
-* Nad oknem Maca działa zwykły kursor Windows (bez opóźnienia obrazu); kliknięcia,
-  przewijanie i przeciąganie trafiają do Maca, obok okna – do Windows.
-* Klawiatura pisze w oknie, które kliknąłeś ostatnio: w oknie Maca albo w aplikacji Windows.
-  Gdy okno Maca ma klawiaturę, u góry monitora widać też pasek menu Maca.
+* Ma przycisk na pasku zadań (z ikoną aplikacji Maca), jest w Alt+Tab, da się je
+  zminimalizować i schować za innymi oknami. Alt+F4 zamyka je na Macu.
+* Obraz każdego okna jest nagrywany osobno, więc przesuwanie nie odsłania tapety,
+  a narożniki są zaokrąglone jak na Macu.
+* Nad oknem Maca działa zwykły kursor Windows (bez opóźnienia obrazu). Kliknięcia
+  i przewijanie trafiają do Maca.
+* Klawiatura pisze w oknie Maca, gdy jest ono aktywne, jak w każdej aplikacji Windows.
+  Klawisz Win, Alt+Tab i Alt+F4 zawsze działają w Windowsie. Gdy aktywne jest okno Maca,
+  u góry monitora widać też pasek menu Maca.
 * Okno wraca na MacBooka, gdy przeciągniesz je przez krawędź monitora po stronie Maca.
-* Okna Maca są zawsze nad oknami Windows (jak okna „zawsze na wierzchu”).
+* Okna, które macOS przywróciłby na ekran wirtualny z poprzedniej sesji, wracają na MacBooka,
+  więc na Windowsie pojawia się tylko to, co przeniesiesz.
 
 W trybie całego pulpitu opcja **Pokazuj go przez cały czas sterowania Makiem** wyświetla
 pulpit Maca od razu po przejściu na Maca, nie dopiero po przeciągnięciu na niego okna.

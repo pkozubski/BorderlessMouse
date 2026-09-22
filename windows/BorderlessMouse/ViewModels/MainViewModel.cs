@@ -67,7 +67,9 @@ public partial class MainViewModel : ObservableObject
     private NativeMethods.RECT _displayMonitor;
     /// <summary>Tryb okien działa (Windows go chce, a Mac obsługuje).</summary>
     private bool _windowModeActive;
-    private List<NormalizedRect> _macWindows = new();
+    private MacWindowList? _macWindows;
+    /// <summary>Tryb okien: aktywne okno Windows to okno Maca (wtedy widać też pasek menu Maca).</summary>
+    private bool _macWindowActive;
     private readonly Stopwatch _displayStatsClock = new();
     private long _displayStatsBytes;
     private long _displayStatsFrames;
@@ -577,6 +579,9 @@ public partial class MainViewModel : ObservableObject
             case MessageType.DisplayWindows:
                 if (_displayRunning && _windowModeActive && Frame.ParseDisplayWindows(payload) is { } windows) ApplyMacWindows(windows);
                 break;
+            case MessageType.WindowIcon:
+                if (_displayRunning && Frame.ParseWindowIcon(payload) is { } icon) _viewer?.SetIcon(icon.pid, icon.png);
+                break;
             case MessageType.WindowHandoff:
                 if (_displayRunning && _windowModeActive && Frame.ParseWindowHandoff(payload) is { } handoff)
                     _capture?.HandoffToWindow(ToScreen(handoff.x, handoff.y));
@@ -699,7 +704,15 @@ public partial class MainViewModel : ObservableObject
                 UpdateStatus();
                 UpdateViewerVisibility();
             };
-            _capture.MacWindowFocusChanged += _ => { if (_windowModeActive) ApplyMacWindows(_macWindows); };
+            _capture.MacWindowAt = point =>
+            {
+                var proxies = _viewer?.Proxies;
+                if (proxies is null || proxies.Count == 0) return null;
+                var root = DisplayNative.GetAncestor(DisplayNative.WindowFromPoint(point), DisplayNative.GA_ROOT);
+                return proxies.TryGetValue(root, out var proxy) ? proxy.Id : null;
+            };
+            _capture.MacWindowIsForeground = () =>
+                _viewer?.Proxies.TryGetValue(NativeMethods.GetForegroundWindow(), out var proxy) == true && !proxy.Popup;
         }
         _capture.Enabled = InputSharingEnabled;
         _capture.Side = SelectedMacSide.Value;
@@ -917,7 +930,7 @@ public partial class MainViewModel : ObservableObject
             }
             if (!OperatingSystem.IsWindows()) return;
             _viewer ??= CreateViewer();
-            _viewer.Start(_displayMonitor);
+            _viewer.Start(_displayMonitor, WantedDisplayMode == DisplayMode.Windows);
             ApplyDisplayModeLocally();
             _videoRx.Start(IPAddress.Parse(_client.RemoteAddress), info.Port, info.Key, info.Token);
             _displayRunning = true;
@@ -942,7 +955,12 @@ public partial class MainViewModel : ObservableObject
     {
         var viewer = new DisplayViewer();
         viewer.Failed += message => Post(() => OnDisplayFailed(message));
-        viewer.KeyframeNeeded += () => { if (_client.IsConnected) _client.Send(Frame.DisplayKeyframe()); };
+        viewer.KeyframeNeeded += streamId =>
+        {
+            if (_client.IsConnected) _client.Send(streamId is { } id ? Frame.DisplayKeyframe(id) : Frame.DisplayKeyframe());
+        };
+        viewer.WindowActivated += (id, active) => Post(() => OnMacWindowActivated(id, active));
+        viewer.CloseRequested += id => { if (_client.IsConnected) _client.Send(Frame.WindowClose(id)); };
         return viewer;
     }
 
@@ -968,7 +986,8 @@ public partial class MainViewModel : ObservableObject
         _displayRunning = false;
         _displayFocus = false;
         _windowModeActive = false;
-        _macWindows = new();
+        _macWindows = null;
+        _macWindowActive = false;
         _capture?.SetWindowMode(false, default);
         _videoRx.Stop();
         _viewer?.Stop();
@@ -985,32 +1004,47 @@ public partial class MainViewModel : ObservableObject
     private DisplayMode WantedDisplayMode =>
         DisplayWindowMode && _macFlags.HasFlag(StatusFlags.WindowModeSupported) ? DisplayMode.Windows : DisplayMode.Fullscreen;
 
-    /// <summary>Tryb okien: obraz tylko tam, gdzie są okna Maca; tryb pełny: cały monitor.</summary>
+    /// <summary>Tryb okien: każde okno Maca to okno Windows; tryb pełny: cały monitor.</summary>
     private void ApplyDisplayModeLocally()
     {
         _windowModeActive = WantedDisplayMode == DisplayMode.Windows;
-        _viewer?.SetRegion(_windowModeActive ? Array.Empty<NativeMethods.RECT>() : null);
+        _macWindows = null;
+        _macWindowActive = false;
+        _viewer?.SetWindowMode(_windowModeActive);
         _capture?.SetWindowMode(_windowModeActive, _displayMonitor);
         UpdateViewerVisibility();
     }
 
-    private void ApplyMacWindows(List<NormalizedRect> windows)
+    private void ApplyMacWindows(MacWindowList list)
     {
-        _macWindows = windows;
-        // Pasek menu Maca zasłoniłby górę pulpitu Windows – tylko gdy okno Maca ma klawiaturę.
-        var menuBar = _capture?.MacWindowFocused == true;
-        var screen = windows.Where(w => menuBar || (w.Flags & NormalizedRect.MenuBar) == 0).Select(w =>
-        {
-            var topLeft = ToScreen(w.X, w.Y);
-            var bottomRight = ToScreen((ushort)Math.Min(65535, w.X + w.Width), (ushort)Math.Min(65535, w.Y + w.Height));
-            return new NativeMethods.RECT { Left = topLeft.X, Top = topLeft.Y, Right = bottomRight.X, Bottom = bottomRight.Y };
-        }).ToArray();
-        _capture?.SetMacWindows(screen);
+        _macWindows = list;
         var m = _displayMonitor;
-        _viewer?.SetRegion(screen.Select(r => new NativeMethods.RECT
+        int ScaleX(int x) => m.Left + (int)((long)x * m.Width / list.DisplayWidth);
+        int ScaleY(int y) => m.Top + (int)((long)y * m.Height / list.DisplayHeight);
+        // Pasek menu Maca zasłoniłby górę pulpitu Windows – tylko gdy aktywne jest okno Maca.
+        var windows = list.Windows.Where(w => !w.IsMenuBar || _macWindowActive).Select(w => new DisplayViewer.ProxyWindow(
+            w.Id, w.Pid,
+            new NativeMethods.RECT { Left = ScaleX(w.X), Top = ScaleY(w.Y), Right = ScaleX(w.X + w.Width), Bottom = ScaleY(w.Y + w.Height) },
+            w.IsPopup || w.IsMenuBar, w.Title)).ToList();
+        _viewer?.UpdateWindows(windows);
+    }
+
+    private void OnMacWindowActivated(uint id, bool active)
+    {
+        if (!_windowModeActive || !_client.IsConnected) return;
+        if (active)
         {
-            Left = r.Left - m.Left, Top = r.Top - m.Top, Right = r.Right - m.Left, Bottom = r.Bottom - m.Top,
-        }).ToArray());
+            _client.Send(Frame.WindowRaise(id));
+            _capture?.NoteRaised(id);
+        }
+        else
+        {
+            // Klawisze wciśnięte w chwili przełączenia (np. Alt przy Alt+Tab) nie mogą zostać na Macu.
+            _client.SendReleaseAll();
+        }
+        if (_macWindowActive == active) return;
+        _macWindowActive = active;
+        if (_macWindows is { } list) ApplyMacWindows(list);
     }
 
     /// <summary>0…65535 na ekranie wirtualnym → piksele ekranu Windows (obraz wypełnia monitor).</summary>
@@ -1037,11 +1071,7 @@ public partial class MainViewModel : ObservableObject
     private void UpdateViewerVisibility()
     {
         if (_viewer is null) return;
-        if (_windowModeActive)
-        {
-            _viewer.SetVisible(_displayRunning);
-            return;
-        }
+        if (_windowModeActive) return; // okna Maca są zwykłymi oknami Windows
         var remote = _capture?.IsRemote == true;
         _viewer.SetVisible(_displayRunning && remote && (_displayFocus || ShowMacDisplayWhileRemote));
     }

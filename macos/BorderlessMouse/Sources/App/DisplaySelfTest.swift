@@ -65,6 +65,38 @@ enum DisplaySelfTest {
         usleep(300_000)
         check(displayID == 0 || !VirtualDisplay.activeDisplays().contains(displayID), "monitor usunięty po zwolnieniu")
 
+        // Nagrywanie pojedynczego okna (tryb okien) na przykładzie okna z ekranu głównego.
+        if DisplayCapture.hasPermission {
+            let windows = WindowTracker.snapshot(displayID: CGMainDisplayID()).filter { !$0.isMenuBar && !$0.isPopup }
+            if let window = windows.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) {
+                let scale = WindowTracker.pixelScale(of: CGMainDisplayID())
+                let size = WindowTracker.pixelSize(of: window, scale: scale)
+                let result = captureWindow(window, width: size.width, height: size.height)
+                check(result.frames > 0, "okno „\(window.title)” \(size.width)×\(size.height): \(result.frames) klatek, zakodowano \(result.encoded)")
+                check(result.encoded > 0, "koder okna zwrócił klatki")
+                print("  promień narożnika okna: \(result.radius) px")
+                // Cały potok trybu okien: WindowStreams → ramki z identyfikatorem okna i promieniem.
+                let lock = NSLock()
+                var frames: [VideoStream.Frame] = []
+                let streams = WindowStreams(send: { frame in lock.lock(); frames.append(frame); lock.unlock(); return true },
+                                            hasClient: { true })
+                streams.start(displayID: CGMainDisplayID())
+                streams.update([window])
+                usleep(1_500_000)
+                streams.requestKeyframe(window.id)
+                usleep(300_000)
+                streams.stop()
+                lock.lock()
+                let own = frames.filter { $0.streamID == window.id }
+                lock.unlock()
+                check(!own.isEmpty && own.first?.isKeyframe == true, "strumień okna: \(own.count) klatek, pierwsza kluczowa")
+                check(own.contains { $0.cornerRadius > 0 }, "promień narożnika w nagłówku klatki: \(own.last?.cornerRadius ?? 0) px")
+                check(own.filter(\.isKeyframe).count >= 2, "klatka kluczowa na żądanie (DISPLAY_KEYFRAME z id okna)")
+            } else {
+                print("– brak okna do testu nagrywania pojedynczego okna")
+            }
+        }
+
         // 2. Koder → szyfrowany TCP → dekoder
         do {
             let result = try loopback(width: 1280, height: 720, colors: [
@@ -113,6 +145,44 @@ enum DisplaySelfTest {
         lock.lock()
         defer { lock.unlock() }
         return count
+    }
+
+    private static func captureWindow(_ window: TrackedWindow, width: Int, height: Int) -> (frames: Int, encoded: Int, radius: UInt16) {
+        let capture = WindowCapture()
+        let lock = NSLock()
+        var frames = 0, encoded = 0
+        var radius: UInt16 = 0
+        let w = max(64, (width + 1) & ~1), h = max(64, (height + 1) & ~1)
+        guard let encoder = try? VideoEncoder(width: w, height: h) else { return (0, 0, 0) }
+        encoder.onFrame = { _ in lock.lock(); encoded += 1; lock.unlock() }
+        capture.onFrame = { buffer, time in
+            lock.lock()
+            frames += 1
+            let first = frames == 1
+            lock.unlock()
+            if first {
+                let r = WindowStreams.measureCornerRadius(buffer)
+                lock.lock(); radius = r; lock.unlock()
+                encoder.requestKeyframe()
+            }
+            encoder.encode(buffer, presentationTime: time)
+        }
+        let started = DispatchSemaphore(value: 0)
+        Task {
+            do {
+                try await capture.start(windowID: window.id, displayID: CGMainDisplayID(), menuBarRect: .zero, width: w, height: h)
+            } catch {
+                print("  błąd nagrywania okna: \(error.localizedDescription)")
+            }
+            started.signal()
+        }
+        started.wait()
+        usleep(1_500_000)
+        capture.stop()
+        encoder.invalidate()
+        lock.lock()
+        defer { lock.unlock() }
+        return (frames, encoded, radius)
     }
 
     // MARK: - Pętla koder → sieć → dekoder

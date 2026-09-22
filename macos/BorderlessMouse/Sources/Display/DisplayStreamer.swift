@@ -44,8 +44,11 @@ final class DisplayStreamer {
     private var generation: UInt64 = 0
     private var lastStats: (frames: UInt64, bytes: UInt64) = (0, 0)
     private var showsCursor = true
+    private var windowStreams: WindowStreams?
 
     // chronione frameLock (kolejka przechwytywania i wątek VideoToolbox)
+    /// Tryb okien: obraz całego ekranu nie jest kodowany (każde okno ma własny strumień).
+    private var fullStreamEnabled = true
     private var awaitingKeyframe = true
     private var lastPixelBuffer: CVPixelBuffer?
     private var droppedFrames: UInt64 = 0
@@ -60,7 +63,10 @@ final class DisplayStreamer {
     func start(_ request: DisplayStartRequest, name: String, completion: @escaping (Result<Ready, Error>) -> Void) {
         queue.async {
             self.stopLocked()
-            self.showsCursor = request.mode == .fullscreen
+            self.showsCursor = true
+            self.frameLock.lock()
+            self.fullStreamEnabled = request.mode == .fullscreen
+            self.frameLock.unlock()
             let generation = self.generation
             Task { await self.startAsync(request, name: name, generation: generation, completion: completion) }
         }
@@ -70,24 +76,34 @@ final class DisplayStreamer {
         queue.sync { stopLocked() }
     }
 
-    /// Tryb okien ukrywa kursor Maca w obrazie (Windows pokazuje własny).
-    func setShowsCursor(_ shows: Bool) {
+    /// Pełny pulpit: jeden strumień całego ekranu. Tryb okien: strumień na każde okno.
+    func setMode(_ mode: DisplayMode) {
         queue.async {
-            guard self.showsCursor != shows else { return }
-            self.showsCursor = shows
-            guard let capture = self.capture, let encoder = self.encoder else { return }
-            let (width, height) = (encoder.width, encoder.height)
-            let queue = self.queue
-            Task { [weak self] in
-                try? await capture.update(width: width, height: height, showsCursor: shows)
-                queue.async { self?.forceKeyframe() }
+            let full = mode == .fullscreen
+            self.frameLock.lock()
+            self.fullStreamEnabled = full
+            let displayID = self.displayIDStorage
+            self.frameLock.unlock()
+            if full {
+                self.windowStreams?.stop()
+                self.forceKeyframe()
+            } else if let displayID {
+                self.windowStreams?.start(displayID: displayID)
             }
         }
     }
 
-    /// Windows prosi o klatkę kluczową (np. po błędzie dekodera).
-    func requestKeyframe() {
-        queue.async { self.forceKeyframe() }
+    /// Tryb okien: nowa lista okien na ekranie wirtualnym.
+    func updateWindows(_ windows: [TrackedWindow]) {
+        windowStreams?.update(windows)
+    }
+
+    /// Windows prosi o klatkę kluczową (np. po błędzie dekodera). nil = wszystkie strumienie.
+    func requestKeyframe(streamID: UInt32? = nil) {
+        queue.async {
+            if streamID == nil { self.forceKeyframe() }
+            self.windowStreams?.requestKeyframe(streamID)
+        }
     }
 
     // MARK: - Start
@@ -129,6 +145,8 @@ final class DisplayStreamer {
                 self.encoder = encoder
                 self.server = server
                 self.capture = capture
+                self.windowStreams = WindowStreams(send: { [weak server] frame in server?.send(frame) ?? false },
+                                                   hasClient: { [weak server] in server?.hasClient ?? false })
                 self.bitrate = encoder.bitrate
                 self.wire(capture: capture, encoder: encoder, server: server)
             }
@@ -159,7 +177,9 @@ final class DisplayStreamer {
             guard let self, let encoder, let server else { return }
             self.frameLock.lock()
             self.lastPixelBuffer = pixelBuffer
+            let enabled = self.fullStreamEnabled
             self.frameLock.unlock()
+            guard enabled else { return }
             // Bez odbiorcy nie ma sensu kodować – klatka kluczowa pójdzie po podłączeniu.
             guard server.hasClient else { return }
             encoder.encode(pixelBuffer, presentationTime: time)
@@ -183,7 +203,10 @@ final class DisplayStreamer {
             NSLog("BorderlessMouse: błąd kodera wideo \(status)")
         }
         server.onClientConnected = { [weak self] in
-            self?.queue.async { self?.forceKeyframe() }
+            self?.queue.async {
+                self?.forceKeyframe()
+                self?.windowStreams?.requestKeyframe(nil)
+            }
         }
         server.onClientDisconnected = { [weak self] in
             self?.queue.async {
@@ -228,6 +251,10 @@ final class DisplayStreamer {
     private func forceKeyframe() {
         guard let encoder, let server, server.hasClient else { return }
         frameLock.lock()
+        guard fullStreamEnabled else {
+            frameLock.unlock()
+            return
+        }
         awaitingKeyframe = true
         let last = lastPixelBuffer
         frameLock.unlock()
@@ -253,7 +280,7 @@ final class DisplayStreamer {
         let frames = server.framesSent
         let bytes = server.bytesSent
         frameLock.lock()
-        let dropped = droppedFrames
+        let dropped = droppedFrames + (windowStreams?.framesDropped ?? 0)
         frameLock.unlock()
         onStats?(Stats(framesPerSecond: Int(frames &- lastStats.frames),
                        kilobitsPerSecond: Int((bytes &- lastStats.bytes) * 8 / 1000),
@@ -305,6 +332,8 @@ final class DisplayStreamer {
         encoder = nil
         server?.onClientConnected = nil
         server?.onClientDisconnected = nil
+        windowStreams?.stop()
+        windowStreams = nil
         server?.stop()
         server = nil
         virtualDisplay = nil // zwolnienie obiektu usuwa monitor z systemu

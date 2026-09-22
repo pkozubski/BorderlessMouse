@@ -39,6 +39,8 @@ enum MessageType: UInt8 {
     case windowEnter = 0x32
     case windowLeave = 0x33
     case windowHandoff = 0x34
+    case windowRaise = 0x35
+    case windowClose = 0x36
     case audioStart = 0x40
     case audioStop = 0x41
     case audioFormat = 0x42
@@ -53,6 +55,7 @@ enum MessageType: UInt8 {
     case displayFocus = 0x84
     case displayMode = 0x85
     case displayWindows = 0x86
+    case windowIcon = 0x87
 }
 
 /// Tryb ekranu wirtualnego po stronie Windows.
@@ -63,12 +66,20 @@ enum DisplayMode: UInt8 {
     case windows = 1
 }
 
-/// Punkt lub prostokąt na ekranie wirtualnym w jednostkach 0…65535 (niezależnie od rozdzielczości).
-struct NormalizedRect: Equatable {
-    let x: UInt16, y: UInt16, width: UInt16, height: UInt16
+/// Okno Maca na ekranie wirtualnym, w pikselach ekranu wirtualnego (może wystawać poza ekran).
+struct WindowDescriptor: Equatable {
+    let id: UInt32
+    let pid: Int32
+    let x: Int32, y: Int32, width: UInt16, height: UInt16
     let flags: UInt8
+    let title: String
 
+    /// Pasek menu ekranu wirtualnego (pokazywany, gdy okno Maca ma klawiaturę).
     static let menuBar: UInt8 = 1 << 0
+    /// Menu, podpowiedź, panel – bez przycisku na pasku zadań, zawsze nad oknami aplikacji.
+    static let popup: UInt8 = 1 << 1
+    /// Strumień paska menu ma stały identyfikator (to nie jest okno aplikacji).
+    static let menuBarStreamID: UInt32 = 0xFFFF_FFFE
 }
 
 enum ClipboardFormat: UInt8 {
@@ -353,15 +364,33 @@ enum Frame {
 
     static func displayFocus(_ active: Bool) -> Data { make(.displayFocus, [active ? 1 : 0]) }
 
-    /// Okna Maca na ekranie wirtualnym, od najwyższego. Najwyżej 255 prostokątów.
-    static func displayWindows(_ rects: [NormalizedRect]) -> Data {
+    /// Okna Maca na ekranie wirtualnym, od najwyższego (najwyżej 64). Współrzędne
+    /// w pikselach ekranu wirtualnego o rozmiarze `displayWidth`×`displayHeight`.
+    static func displayWindows(_ windows: [WindowDescriptor], displayWidth: Int, displayHeight: Int) -> Data {
         var w = ByteWriter()
-        let limited = rects.prefix(255)
+        let limited = windows.prefix(64)
+        w.u16(UInt16(clamping: displayWidth))
+        w.u16(UInt16(clamping: displayHeight))
         w.u8(UInt8(limited.count))
-        for rect in limited {
-            w.u16(rect.x); w.u16(rect.y); w.u16(rect.width); w.u16(rect.height); w.u8(rect.flags)
+        for window in limited {
+            w.u32(window.id)
+            w.u32(UInt32(bitPattern: window.pid))
+            w.u32(UInt32(bitPattern: window.x)); w.u32(UInt32(bitPattern: window.y))
+            w.u16(window.width); w.u16(window.height)
+            w.u8(window.flags)
+            let title = Array(String(decoding: window.title.utf8.prefix(120), as: UTF8.self).utf8)
+            w.u8(UInt8(title.count))
+            w.raw(title)
         }
         return make(.displayWindows, w.bytes)
+    }
+
+    /// Ikona aplikacji (PNG) dla okien na pasku zadań Windows.
+    static func windowIcon(pid: Int32, png: Data) -> Data {
+        var w = ByteWriter()
+        w.u32(UInt32(bitPattern: pid))
+        w.raw(Array(png))
+        return make(.windowIcon, w.bytes)
     }
 
     /// Upuszczono okno na ekranie wirtualnym: Windows przejmuje kursor w tym punkcie.

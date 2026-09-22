@@ -16,10 +16,15 @@ enum VideoStream {
     static let lengthBytes = 4
     /// kind, flags, width, height, captureMicros
     static let frameHeaderBytes = 14
+    /// Klatka okna: dodatkowo `u32 streamID`, `u16 cornerRadius` (piksele).
+    static let windowFrameHeaderBytes = 20
     static let maxRecordBytes = 16 * 1024 * 1024
 
     enum Kind: UInt8 {
+        /// Cały ekran wirtualny.
         case h264AccessUnit = 1
+        /// Jedno okno Maca (osobny strumień H.264 na okno).
+        case windowAccessUnit = 2
     }
 
     struct FrameFlags: OptionSet {
@@ -34,6 +39,9 @@ enum VideoStream {
         let height: Int
         let captureMicros: UInt64
         let payload: Data
+        /// Tylko `windowAccessUnit`: identyfikator okna (CGWindowID) albo paska menu.
+        let streamID: UInt32
+        let cornerRadius: UInt16
 
         var isKeyframe: Bool { flags.contains(.keyframe) }
 
@@ -44,28 +52,45 @@ enum VideoStream {
             w.u16(UInt16(clamping: width))
             w.u16(UInt16(clamping: height))
             w.u64(captureMicros)
+            if kind == .windowAccessUnit {
+                w.u32(streamID)
+                w.u16(cornerRadius)
+            }
             var data = Data(w.bytes)
             data.append(payload)
             return data
         }
 
-        init(kind: Kind, flags: FrameFlags, width: Int, height: Int, captureMicros: UInt64, payload: Data) {
+        init(kind: Kind, flags: FrameFlags, width: Int, height: Int, captureMicros: UInt64, payload: Data,
+             streamID: UInt32 = 0, cornerRadius: UInt16 = 0) {
             self.kind = kind
             self.flags = flags
             self.width = width
             self.height = height
             self.captureMicros = captureMicros
             self.payload = payload
+            self.streamID = streamID
+            self.cornerRadius = cornerRadius
         }
 
         init?(decoding data: Data) {
-            guard data.count > VideoStream.frameHeaderBytes else { return nil }
-            var r = ByteReader([UInt8](data.prefix(VideoStream.frameHeaderBytes)))
-            guard let kindRaw = r.u8(), let kind = Kind(rawValue: kindRaw),
-                  let flags = r.u8(), let width = r.u16(), let height = r.u16(),
+            guard let first = data.first, let kind = Kind(rawValue: first) else { return nil }
+            let headerBytes = kind == .windowAccessUnit ? VideoStream.windowFrameHeaderBytes : VideoStream.frameHeaderBytes
+            guard data.count > headerBytes else { return nil }
+            var r = ByteReader([UInt8](data.prefix(headerBytes)))
+            _ = r.u8()
+            guard let flags = r.u8(), let width = r.u16(), let height = r.u16(),
                   let micros = r.u64(), width > 0, height > 0 else { return nil }
+            var streamID: UInt32 = 0
+            var radius: UInt16 = 0
+            if kind == .windowAccessUnit {
+                guard let id = r.u32(), let corner = r.u16() else { return nil }
+                streamID = id
+                radius = corner
+            }
             self.init(kind: kind, flags: FrameFlags(rawValue: flags), width: Int(width), height: Int(height),
-                      captureMicros: micros, payload: Data(data.dropFirst(VideoStream.frameHeaderBytes)))
+                      captureMicros: micros, payload: Data(data.dropFirst(headerBytes)),
+                      streamID: streamID, cornerRadius: radius)
         }
     }
 

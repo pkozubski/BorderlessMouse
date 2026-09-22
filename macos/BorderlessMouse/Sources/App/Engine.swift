@@ -65,6 +65,9 @@ final class Engine {
     private var displayMode: DisplayMode = .fullscreen
     private var displayID: CGDirectDisplayID?
     private let windowTracker = WindowTracker()
+    /// Tryb okien: ostatnia lista (do podnoszenia i zamykania okien z Windowsa).
+    private var trackedWindows: [UInt32: TrackedWindow] = [:]
+    private var sentIcons: Set<Int32> = []
 
     init(config: Config) {
         self.config = config
@@ -350,8 +353,14 @@ final class Engine {
         case .displayStop:
             stopDisplayLocked(notify: true, reason: nil)
         case .displayKeyframe:
-            display.requestKeyframe()
+            display.requestKeyframe(streamID: r.u32())
             windowTracker.resend()
+        case .windowRaise:
+            guard let id = r.u32(), let window = trackedWindows[id] else { return }
+            DispatchQueue.main.async { WindowControl.raise(windowID: id, pid: window.pid, frame: window.frame) }
+        case .windowClose:
+            guard let id = r.u32(), let window = trackedWindows[id] else { return }
+            DispatchQueue.main.async { WindowControl.close(windowID: id, pid: window.pid, frame: window.frame) }
         case .displayMode:
             guard let raw = r.u8(), let mode = DisplayMode(rawValue: raw) else { return }
             applyDisplayMode(mode)
@@ -450,19 +459,40 @@ final class Engine {
     private func applyDisplayMode(_ mode: DisplayMode) {
         displayMode = mode
         guard displayRunning == true, let id = displayID else { return }
-        display.setShowsCursor(mode == .fullscreen)
+        display.setMode(mode)
         injector.handsOffDroppedWindows = mode == .windows
         if mode == .windows {
-            windowTracker.start(displayID: id) { [weak self] rects in
-                self?.server.send(Frame.displayWindows(rects))
+            windowTracker.start(displayID: id) { [weak self] windows in
+                self?.windowsChanged(windows, displayID: id)
             }
         } else {
             windowTracker.stop()
+            trackedWindows = [:]
             injector.windowLeave(keepKeyboard: false)
         }
         emit(.log(mode == .windows
                   ? L10n.text("Ekran wirtualny: tryb okien", "Virtual display: window mode")
                   : L10n.text("Ekran wirtualny: pełny pulpit", "Virtual display: full desktop")))
+    }
+
+    /// Kolejka trackera: strumienie okien, lista dla Windowsa i ikony nowych aplikacji.
+    private func windowsChanged(_ windows: [TrackedWindow], displayID: CGDirectDisplayID) {
+        display.updateWindows(windows)
+        let descriptors = windows.map { WindowTracker.descriptor($0, on: displayID) }
+        let mode = CGDisplayCopyDisplayMode(displayID)
+        server.send(Frame.displayWindows(descriptors, displayWidth: mode?.pixelWidth ?? 0,
+                                         displayHeight: mode?.pixelHeight ?? 0))
+        eventsQueue.async {
+            self.trackedWindows = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let newApps = Set(windows.filter { !$0.isMenuBar }.map(\.pid)).subtracting(self.sentIcons)
+            guard !newApps.isEmpty else { return }
+            self.sentIcons.formUnion(newApps)
+            DispatchQueue.main.async {
+                for pid in newApps {
+                    if let png = WindowControl.iconPNG(pid: pid) { self.server.send(Frame.windowIcon(pid: pid, png: png)) }
+                }
+            }
+        }
     }
 
     /// `reason` != nil: Windows dostaje komunikat, że strumień się zakończył.
@@ -472,6 +502,8 @@ final class Engine {
         displayRunning = nil
         displayID = nil
         windowTracker.stop()
+        trackedWindows = [:]
+        sentIcons = []
         injector.handsOffDroppedWindows = false
         injector.windowLeave(keepKeyboard: false)
         injector.virtualDisplayID = nil

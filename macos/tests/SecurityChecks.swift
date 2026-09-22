@@ -80,8 +80,15 @@ struct SecurityChecks {
         expect(DisplayStartRequest(payload: request.payload) == request, "display start round trip")
         expect(DisplayStartRequest(payload: Array(request.payload.prefix(12)))?.mode == .fullscreen,
                "display start without mode byte means full desktop")
-        let windows = Frame.displayWindows([NormalizedRect(x: 1, y: 2, width: 0x8000, height: 0xFFFF, flags: NormalizedRect.menuBar)])
-        expect(windows == data("860a" + "01" + "0100" + "0200" + "0080" + "ffff" + "01"), "display windows layout")
+        let window = WindowDescriptor(id: 0x01020304, pid: 77, x: -10, y: 20, width: 800, height: 600,
+                                      flags: WindowDescriptor.popup, title: "Ąb")
+        expect(Frame.displayWindows([window], displayWidth: 1920, displayHeight: 1080)
+               == data("861e8007380401040302014d000000f6ffffff14000000200358020203c48462"), "display windows layout (shared with Windows)")
+        let windowFrame = VideoStream.Frame(kind: .windowAccessUnit, flags: [.keyframe], width: 800, height: 600, captureMicros: 5,
+                                            payload: Data([0, 0, 0, 1, 0x65]), streamID: 0x01020304, cornerRadius: 34)
+        expect(windowFrame.encoded() == data("02012003580205000000000000000403020122000000000165"), "window frame layout")
+        expect(VideoStream.Frame(decoding: windowFrame.encoded()) == windowFrame, "window frame round trip")
+        expect(Frame.windowIcon(pid: 77, png: Data([0x89, 0x50])) == data("87064d0000008950"), "window icon layout")
         expect(Frame.windowHandoff(x: 0x1234, y: 0xFFFF) == data("34041234ffff".replacingOccurrences(of: "1234", with: "3412")),
                "window handoff layout")
         var badCodec = request.payload

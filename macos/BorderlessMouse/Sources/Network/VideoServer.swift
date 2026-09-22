@@ -34,7 +34,8 @@ final class VideoServer {
 
     /// Nie czekamy na zaległe klatki: gdy sieć nie nadąża, klatkę odrzucamy
     /// i prosimy koder o klatkę kluczową (patrz VideoPipeline).
-    private let maxInFlightFrames = 3
+    /// Tryb okien wysyła kilka strumieni naraz, stąd zapas większy niż 2–3 klatki.
+    private let maxInFlightFrames = 12
     private let maxInFlightBytes = 8 * 1024 * 1024
 
     private(set) var framesSent: UInt64 = 0

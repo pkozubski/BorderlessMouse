@@ -63,6 +63,8 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x32 | WINDOW_ENTER | W → M | `u16 x`, `u16 y` – kursor Windows nad oknem Maca |
 | 0x33 | WINDOW_LEAVE | W → M | `u8 keepKeyboard` – kursor zszedł z okna (1 = klawiatura nadal w oknie Maca) |
 | 0x34 | WINDOW_HANDOFF | M → W | `u16 x`, `u16 y` – okno upuszczone na ekranie wirtualnym, Windows przejmuje kursor |
+| 0x35 | WINDOW_RAISE | W → M | `u32 windowID` – okno aktywowane na Windowsie, Mac wyciąga je na wierzch |
+| 0x36 | WINDOW_CLOSE | W → M | `u32 windowID` – Alt+F4 / zamknięcie z paska zadań |
 | 0x40 | AUDIO_START | W → M | `u16 udpPort`, `u8 format` |
 | 0x41 | AUDIO_STOP | W → M | – |
 | 0x42 | AUDIO_FORMAT | M → W | `u32 rate`, `u8 channels`, `u8 format`, `u8 status`, komunikat |
@@ -73,10 +75,11 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x80 | DISPLAY_START | W → M | `u16 width`, `u16 height`, `u16 scalePercent`, `u8 edge`, `u8 codec=0`, `u32 maxBitrateKbps` (0 = auto), opcjonalnie `u8 mode` (0 = cały pulpit, 1 = okna) |
 | 0x81 | DISPLAY_STOP | W → M | – |
 | 0x82 | DISPLAY_READY | M → W | `u8 status`, `u16 port`, `32 B key`, `16 B token`, `u16 width`, `u16 height`, komunikat |
-| 0x83 | DISPLAY_KEYFRAME | W → M | – |
+| 0x83 | DISPLAY_KEYFRAME | W → M | opcjonalnie `u32 streamID` (brak = wszystkie strumienie) |
 | 0x84 | DISPLAY_FOCUS | M → W | `u8 active` |
 | 0x85 | DISPLAY_MODE | W → M | `u8 mode` |
-| 0x86 | DISPLAY_WINDOWS | M → W | `u8 count`, `count ×` (`u16 x`, `u16 y`, `u16 w`, `u16 h`, `u8 flags`; bit 0 = pasek menu), od najwyższego |
+| 0x86 | DISPLAY_WINDOWS | M → W | `u16 displayWidth`, `u16 displayHeight`, `u8 count`, `count ×` (`u32 id`, `i32 pid`, `i32 x`, `i32 y`, `u16 w`, `u16 h`, `u8 flags`, `u8 titleLength`, tytuł UTF-8); piksele ekranu wirtualnego, od najwyższego; flagi: bit 0 pasek menu, bit 1 menu/podpowiedź |
+| 0x87 | WINDOW_ICON | M → W | `i32 pid`, PNG 64×64 – ikona aplikacji na pasek zadań |
 
 Flagi `STATUS`: bit 0 Dostępność, bit 1 przechwytywanie audio, bit 2 kursor na Macu,
 bit 3 Mac obsługuje ekran wirtualny, bit 4 ekran wirtualny włączony na Macu,
@@ -135,13 +138,18 @@ ciphertext
 Nonce i AAD to `"BLMV" || counter`. Po odszyfrowaniu:
 
 ```
-u8  kind = 1        // jednostka dostępu H.264, Annex B
+u8  kind            // 1 = cały ekran wirtualny, 2 = jedno okno (tryb okien)
 u8  flags           // bit 0: klatka kluczowa
 u16 width
 u16 height
 u64 captureMicros   // tylko diagnostyka
+[u32 streamID]      // tylko kind 2: CGWindowID okna albo 0xFFFFFFFE (pasek menu)
+[u16 cornerRadius]  // tylko kind 2: promień narożnika okna w pikselach
 H.264 Annex B
 ```
+
+Strumień okna ma rozmiar okna w pikselach, dopełniony do parzystych wymiarów i co
+najmniej 64×64 (okno leży w lewym górnym rogu klatki).
 
 Rekord ma najwyżej 16 MiB. ScreenCaptureKit nie dostarcza klatek, gdy ekran się nie
 zmienia, więc nieruchomy obraz nie generuje ruchu. Gdy sieć nie nadąża, Mac odrzuca klatki
@@ -158,19 +166,24 @@ pojawia się przy tej samej krawędzi monitora.
 
 ### Tryb okien
 
-W trybie okien (`mode = 1`) Windows pokazuje obraz ekranu wirtualnego tylko w prostokątach
-z `DISPLAY_WINDOWS` (Mac wysyła je po każdej zmianie, do ~15 razy na sekundę); reszta
-monitora to zwykły pulpit Windows. Mac nie rysuje wtedy kursora w obrazie.
+W trybie okien (`mode = 1`) każde okno Maca leżące na ekranie wirtualnym ma na Windowsie
+własne okno systemowe (pasek zadań, Alt+Tab, minimalizacja, kolejność okien). Mac nagrywa
+każde okno osobno (ScreenCaptureKit, niezależnie od położenia i okien nad nim) i wysyła je
+jako osobne strumienie `kind = 2`; listę okien (`DISPLAY_WINDOWS`) do ~30 razy na sekundę.
 
-* Kursor Windows nad oknem Maca zostaje lokalny i widoczny. Windows wysyła `WINDOW_ENTER`,
-  potem `MOUSE_ABSOLUTE` przy każdym ruchu oraz zwykłe `MOUSE_BUTTON` / `MOUSE_WHEEL`.
-  Z wciśniętym przyciskiem kursor należy do Maca także poza oknem (przeciąganie).
-* `WINDOW_LEAVE` kończy sterowanie myszą. Klawiatura (`KEY`) trafia do Maca od kliknięcia
-  w okno Maca do kliknięcia w aplikację Windows.
+* Kursor Windows nad oknem Maca zostaje lokalny. Windows wysyła `WINDOW_ENTER`, potem
+  `MOUSE_ABSOLUTE` przy każdym ruchu oraz kopie `MOUSE_BUTTON` / `MOUSE_WHEEL`; kliknięcia
+  docierają też do okna Windows (aktywacja, kolejność). Przed kliknięciem w inne okno
+  Windows wysyła `WINDOW_RAISE`, żeby na Macu leżało ono na wierzchu.
+* Klawiatura (`KEY`) trafia do Maca, gdy aktywne okno Windows reprezentuje okno Maca.
+  Skróty Windows (klawisz Win, Alt+Tab, Alt+Esc, Alt+F4) zostają w Windowsie; przy utracie
+  aktywności Windows wysyła `RELEASE_ALL`.
 * Przeciągnięcie okna z MacBooka na ekran wirtualny i puszczenie przycisku kończy się
-  `WINDOW_HANDOFF`: Windows kontynuuje od tego punktu w trybie okien.
+  `WINDOW_HANDOFF`: Windows kontynuuje od tego punktu.
 * Przeciągnięcie okna Maca przez krawędź Windows po stronie Maca wysyła zwykłe `ENTER`;
   Mac zachowuje wciśnięty przycisk, więc okno przechodzi na ekran MacBooka.
+* Okna przywrócone przez macOS z poprzedniej sesji Mac odsyła na fizyczny ekran, więc
+  każda sesja zaczyna się bez okien.
 
 ## Granice zaufania
 

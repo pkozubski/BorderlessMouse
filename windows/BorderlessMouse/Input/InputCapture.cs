@@ -30,10 +30,9 @@ public sealed class InputCapture : IDisposable
     // tryb okien (wątek UI – tak jak hooki)
     private bool _windowMode;
     private RECT _macMonitor;
-    private RECT[] _macWindows = Array.Empty<RECT>();
     private bool _windowInput;
     private int _windowButtons;
-    private bool _keyboardToMacValue;
+    private uint _lastRaisedWindow;
     private DateTime _windowGraceUntil = DateTime.MinValue;
 
     /// <summary>Liczba ruchów myszy wysłanych do Maca w bieżącej sesji zdalnej.</summary>
@@ -206,36 +205,22 @@ public sealed class InputCapture : IDisposable
     // ---------------- tryb okien ----------------
 
     /// <summary>
-    /// Tryb okien: okna Maca leżą na pulpicie Windows. Nad nimi kursor Windows zostaje
-    /// widoczny i lokalny (bez opóźnienia wideo), a Mac dostaje jego pozycję, kliknięcia
-    /// i przewijanie. Klawiatura idzie do ostatnio klikniętego okna – Maca albo Windows.
+    /// Tryb okien: każde okno Maca jest prawdziwym oknem Windows. Nad nim kursor Windows
+    /// zostaje lokalny (bez opóźnienia obrazu), kliknięcia trafiają normalnie do tego okna
+    /// (aktywacja, kolejność), a Mac dostaje ich kopię w pozycjach bezwzględnych. Klawiatura
+    /// idzie do Maca, gdy aktywne jest okno Maca – jak w każdej innej aplikacji.
     /// </summary>
     public void SetWindowMode(bool enabled, RECT monitor)
     {
         if (!enabled) ResetWindowInput(notifyMac: true);
         _windowMode = enabled;
         _macMonitor = monitor;
-        if (!enabled) _macWindows = Array.Empty<RECT>();
     }
 
-    /// <summary>Prostokąty okien Maca we współrzędnych ekranu (wątek UI, jak hooki).</summary>
-    public void SetMacWindows(RECT[] rects) => _macWindows = rects;
-
-    /// <summary>Okno Maca ma klawiaturę (zostało kliknięte). Wątek UI.</summary>
-    public event Action<bool>? MacWindowFocusChanged;
-    public bool MacWindowFocused => _keyboardToMacValue;
-
-    private bool _keyboardToMac
-    {
-        get => _keyboardToMacValue;
-        set
-        {
-            if (_keyboardToMacValue == value) return;
-            _keyboardToMacValue = value;
-            // Zmiana w hooku: interfejs (pasek menu Maca) aktualizujemy poza nim.
-            Dispatcher.UIThread.Post(() => MacWindowFocusChanged?.Invoke(value));
-        }
-    }
+    /// <summary>Okno Maca pod punktem ekranu (identyfikator) – z listy okien podglądu.</summary>
+    public Func<POINT, uint?>? MacWindowAt { get; set; }
+    /// <summary>Aktywne okno Windows jest oknem Maca (klawiatura idzie do Maca).</summary>
+    public Func<bool>? MacWindowIsForeground { get; set; }
 
     /// <summary>
     /// Mac oddał kursor po upuszczeniu przeciąganego okna na ekranie wirtualnym:
@@ -251,15 +236,15 @@ public sealed class InputCapture : IDisposable
             RemoteChanged?.Invoke(false);
         }
         SetCursorPos(point.X, point.Y);
-        // Lista okien dociera kilkanaście razy na sekundę – do tego czasu ufamy Macowi.
-        _windowGraceUntil = DateTime.UtcNow.AddMilliseconds(400);
-        _keyboardToMac = true;
+        // Okno Windows dla upuszczonego okna powstaje chwilę później – do tego czasu ufamy Macowi.
+        _windowGraceUntil = DateTime.UtcNow.AddMilliseconds(500);
         EnterWindowInput(point);
     }
 
     private bool HandleWindowMouse(int msg, in MSLLHOOKSTRUCT d)
     {
-        var inside = HitMacWindow(d.pt) || DateTime.UtcNow < _windowGraceUntil;
+        var over = MacWindowAt?.Invoke(d.pt);
+        var inside = over is not null || DateTime.UtcNow < _windowGraceUntil;
         if (msg == WM_MOUSEMOVE)
         {
             if (_windowInput)
@@ -280,28 +265,23 @@ public sealed class InputCapture : IDisposable
             return false; // kursor Windows porusza się normalnie
         }
 
-        if (!_windowInput)
+        if (!_windowInput) return false;
+        if (IsButtonDown(msg) && over is { } id && id != _lastRaisedWindow)
         {
-            // Kliknięcie w aplikację Windows zabiera klawiaturę z okna Maca.
-            if (_keyboardToMac && IsButtonDown(msg))
-            {
-                _keyboardToMac = false;
-                _client.Send(Frame.WindowLeave(keepKeyboard: false));
-            }
-            return false;
+            // Najpierw wyciągamy okno na wierzch na Macu – inaczej kliknięcie trafiłoby
+            // w okno Maca, które tam leży wyżej, choć na Windowsie jest schowane.
+            _client.Send(Frame.WindowRaise(id));
+            _lastRaisedWindow = id;
         }
         if (!ForwardButtonOrWheel(msg, d)) return false;
-        if (IsButtonDown(msg))
-        {
-            _windowButtons++;
-            _keyboardToMac = true;
-        }
-        else if (msg is WM_LBUTTONUP or WM_RBUTTONUP or WM_MBUTTONUP or WM_XBUTTONUP)
-        {
-            _windowButtons = Math.Max(0, _windowButtons - 1);
-        }
-        return true;
+        if (IsButtonDown(msg)) _windowButtons++;
+        else if (msg is WM_LBUTTONUP or WM_RBUTTONUP or WM_MBUTTONUP or WM_XBUTTONUP) _windowButtons = Math.Max(0, _windowButtons - 1);
+        // Kliknięcie dociera też do okna Windows: aktywuje je i ustawia na wierzchu.
+        return false;
     }
+
+    /// <summary>Okno Maca aktywowane w Windowsie (np. Alt+Tab) – wyciągnięte na wierzch na Macu.</summary>
+    public void NoteRaised(uint id) => _lastRaisedWindow = id;
 
     private void EnterWindowInput(POINT pt)
     {
@@ -316,25 +296,24 @@ public sealed class InputCapture : IDisposable
         if (!_windowInput) return;
         _windowInput = false;
         _windowButtons = 0;
-        _client.Send(Frame.WindowLeave(_keyboardToMac));
+        _client.Send(Frame.WindowLeave(MacWindowIsForeground?.Invoke() == true));
     }
 
     private void ResetWindowInput(bool notifyMac)
     {
-        if (notifyMac && (_windowInput || _keyboardToMac) && _client.IsConnected)
+        if (notifyMac && _windowInput && _client.IsConnected)
             _client.Send(Frame.WindowLeave(keepKeyboard: false));
         _windowInput = false;
         _windowButtons = 0;
-        _keyboardToMac = false;
+        _lastRaisedWindow = 0;
     }
 
-    private bool HitMacWindow(POINT pt)
+    /// <summary>Skróty systemu Windows (Alt+Tab, Win, Alt+F4…) zawsze zostają w Windowsie.</summary>
+    private bool IsWindowsShortcut(ushort vk)
     {
-        foreach (var r in _macWindows)
-        {
-            if (pt.X >= r.Left && pt.X < r.Right && pt.Y >= r.Top && pt.Y < r.Bottom) return true;
-        }
-        return false;
+        bool Held(params ushort[] codes) => _keysDown.Any(k => codes.Contains(k.vk));
+        if (vk is 0x5B or 0x5C || Held(0x5B, 0x5C)) return true;
+        return vk is 0x09 or 0x1B or 0x73 && Held(0xA4, 0xA5, 0x12);
     }
 
     /// <summary>Punkt ekranu → 0…65535 na ekranie wirtualnym (wyświetlanym na całym monitorze).</summary>
@@ -421,7 +400,6 @@ public sealed class InputCapture : IDisposable
         // przycisk, więc nie wysyłamy WINDOW_LEAVE (ono zwolniłoby przycisk).
         _windowInput = false;
         _windowButtons = 0;
-        _keyboardToMac = false;
         IsRemote = true;
         Interlocked.Exchange(ref _remoteMoves, 0);
         LastEnterUtc = DateTime.UtcNow;
@@ -547,7 +525,14 @@ public sealed class InputCapture : IDisposable
         var repeat = down && _keysDown.Contains(key);
         if (down) _keysDown.Add(key); else _keysDown.Remove(key);
 
-        if (!IsRemote && !(_windowMode && _keyboardToMac && _client.IsConnected)) return false;
+        if (!IsRemote)
+        {
+            // Tryb okien: klawiatura należy do aktywnego okna – Maca albo Windows.
+            if (!_windowMode || !_client.IsConnected || MacWindowIsForeground?.Invoke() != true || IsWindowsShortcut(vk)) return false;
+            _client.SendKey(scan, vk, ext, down, repeat);
+            // Ctrl/Alt/Shift widzi też Windows – inaczej Alt+Tab i Alt+F4 nie zadziałałyby.
+            return vk is not (0x10 or 0x11 or 0x12 or 0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5);
+        }
         _client.SendKey(scan, vk, ext, down, repeat);
         return true;
     }

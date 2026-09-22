@@ -38,7 +38,8 @@ final class InputInjector {
     /// Tryb okien: klawiatura należy do ostatnio klikniętego okna Maca, także gdy kursor jest obok.
     private(set) var hasWindowKeyboard = false
     private var acceptsInput: Bool { isActive || isWindowInput }
-    private var acceptsKeys: Bool { isActive || isWindowInput || hasWindowKeyboard }
+    /// Tryb okien: Windows wysyła klawisze tylko wtedy, gdy aktywne jest okno Maca.
+    private var acceptsKeys: Bool { isActive || isWindowInput || hasWindowKeyboard || handsOffDroppedWindows }
     private var position = CGPoint.zero
     private var returnEdge: ScreenEdge = .right
     private var currentDisplay = Display(id: 0, bounds: .zero)
