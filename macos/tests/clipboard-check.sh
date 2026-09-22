@@ -8,6 +8,7 @@ swiftc -parse-as-library -swift-version 5 -framework AppKit -framework ImageIO -
   macos/BorderlessMouse/Sources/Localization/L10n.swift \
   macos/BorderlessMouse/Sources/Protocol/Protocol.swift \
   macos/BorderlessMouse/Sources/Protocol/ClipboardContent.swift \
+  macos/BorderlessMouse/Sources/Protocol/VideoStream.swift \
   macos/BorderlessMouse/Sources/App/ClipboardSync.swift \
   macos/tests/ClipboardChecks.swift -o "$TEST_DIR/clipboard-checks"
 "$TEST_DIR/clipboard-checks" "$PWD/tests/fixtures/clipboard.json"

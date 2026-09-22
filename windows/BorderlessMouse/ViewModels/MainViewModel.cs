@@ -2,7 +2,10 @@ using System.Collections.ObjectModel;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Threading;
+using System.Diagnostics;
+using System.Net;
 using BorderlessMouse.Audio;
+using BorderlessMouse.Display;
 using BorderlessMouse.Input;
 using BorderlessMouse.Models;
 using BorderlessMouse.Net;
@@ -52,6 +55,20 @@ public partial class MainViewModel : ObservableObject
     private bool _audioRequested;
     private bool _warnedAccessibility;
 
+    // ekran wirtualny Maca
+    private readonly VideoReceiver _videoRx = new();
+    private DisplayViewer? _viewer;
+    private StatusFlags _macFlags;
+    /// <summary>Wysłano DISPLAY_START; po błędzie zostaje true, żeby nie ponawiać w pętli.</summary>
+    private bool _displayRequested;
+    private bool _displayRunning;
+    /// <summary>Kursor sterowany z Windowsa jest na ekranie wirtualnym Maca.</summary>
+    private bool _displayFocus;
+    private NativeMethods.RECT _displayMonitor;
+    private readonly Stopwatch _displayStatsClock = new();
+    private long _displayStatsBytes;
+    private long _displayStatsFrames;
+
     public MainViewModel()
     {
         _settings = Settings.Load();
@@ -85,6 +102,8 @@ public partial class MainViewModel : ObservableObject
         _jitterBufferMs = _settings.JitterBufferMs;
         _exclusiveMode = _settings.ExclusiveMode;
         _clipboardSyncEnabled = _settings.ClipboardSyncEnabled;
+        _displayEnabled = _settings.DisplayEnabled;
+        _showMacDisplayWhileRemote = _settings.ShowMacDisplayWhileRemote;
         _autoCheckUpdates = _settings.AutoCheckUpdates;
         _startMinimized = _settings.StartMinimized;
         _hasCompletedOnboarding = _settings.HasCompletedOnboarding;
@@ -105,6 +124,8 @@ public partial class MainViewModel : ObservableObject
         _client.MessageReceived += (type, payload) => Post(() => OnMessage(type, payload));
         _client.RttMeasured += rtt => Post(() => RttMs = rtt);
         _discovery.PeerFound += peer => Post(() => OnPeerFound(peer));
+        _videoRx.FrameReceived += frame => _viewer?.Enqueue(frame);
+        _videoRx.Closed += reason => Post(() => OnDisplayFailed(reason ?? T("Strumień ekranu zakończony.", "The display stream ended.")));
 
         _statsTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) => UpdateStats());
         _loading = false;
@@ -136,6 +157,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(JitterBufferLabel))] private double _jitterBufferMs;
     [ObservableProperty] private bool _exclusiveMode;
     [ObservableProperty] private bool _clipboardSyncEnabled;
+    [ObservableProperty] private bool _displayEnabled;
+    [ObservableProperty] private bool _showMacDisplayWhileRemote;
     [ObservableProperty] private bool _autoCheckUpdates;
     [ObservableProperty] private bool _launchAtLogin;
     [ObservableProperty] private bool _startMinimized;
@@ -170,6 +193,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _hasDiscoveredPeers;
     [ObservableProperty] private string _clipboardStatusText = T("Brak synchronizacji w tej sesji", "No synchronization in this session");
     [ObservableProperty] private bool _macAccessibilityMissing;
+    [ObservableProperty] private string _displayStatusText = T("Nieaktywny – uruchamia się po połączeniu z Makiem.", "Inactive — starts after connecting to the Mac.");
+    [ObservableProperty] private IBrush _displayStatusBrush = Gray;
+    [ObservableProperty] private string _displayStatsText = "";
 
     // aktualizacje
     [ObservableProperty] private bool _updateAvailable;
@@ -220,6 +246,9 @@ public partial class MainViewModel : ObservableObject
         AudioLevel = 0.42f;
         AudioStatsText = T("bufor 21 ms · pakiety 18432 · utracone 0 · odrzucone 0 · niedopełnienia 0 · przepełnienia 0", "buffer 21 ms · packets 18432 · lost 0 · rejected 0 · underruns 0 · overruns 0");
         ClipboardStatusText = T("Odebrano 128 zn. z Maca · 21:40:12", "Received 128 characters from Mac · 21:40:12");
+        DisplayStatusText = T("Działa · 2560×1440 · kursor na ekranie Maca", "Running · 2560×1440 · pointer on the Mac display");
+        DisplayStatusBrush = Green;
+        DisplayStatsText = T("60 kl./s · 6,4 Mb/s · dekodowanie GPU", "60 fps · 6.4 Mb/s · GPU decoding");
         UpdateStatusText = T($"Masz najnowszą wersję · sprawdzono {DateTime.Now:HH:mm}", $"Up to date · checked {DateTime.Now:HH:mm}");
         ConnectionInfo = T("Połączono z MacBook Air · 192.168.1.42:47800 · ping 0,4 ms", "Connected to MacBook Air · 192.168.1.42:47800 · ping 0.4 ms");
         StatusText = T("Sterujesz Makiem", "Controlling Mac");
@@ -386,6 +415,9 @@ public partial class MainViewModel : ObservableObject
         _statsTimer.Stop();
         _updateTimer?.Stop();
         StopAudio(notifyMac: true);
+        StopDisplay(notifyMac: true);
+        _viewer?.Dispose();
+        _viewer = null;
         _capture?.Dispose();
         _capture = null;
         _client.Disconnect(null);
@@ -499,6 +531,9 @@ public partial class MainViewModel : ObservableObject
         _capture?.ReturnToLocal(0.5f, sendRelease: false);
         ApplyHookState(); // bez połączenia hooki są zbędne
         StopAudio(notifyMac: false);
+        StopDisplay(notifyMac: false);
+        _macFlags = StatusFlags.None;
+        SetDisplayStatus(T("Nieaktywny – uruchamia się po połączeniu z Makiem.", "Inactive — starts after connecting to the Mac."), Gray);
         MacStatusText = "";
         MacAccessibilityMissing = false;
         var pairingFailure = reason?.Contains("kod parowania", StringComparison.OrdinalIgnoreCase) == true
@@ -524,7 +559,20 @@ public partial class MainViewModel : ObservableObject
             case MessageType.Leave:
                 if (Frame.ParseLeave(payload) is { } leave)
                 {
-                    _capture?.ReturnToLocal(leave.ratio, sendRelease: true);
+                    var fromDisplay = Frame.LeaveFromVirtualDisplay(payload) && _displayRunning;
+                    _capture?.ReturnToLocal(leave.ratio, sendRelease: true, fromDisplay ? _displayMonitor : null);
+                    _displayFocus = false;
+                    UpdateViewerVisibility();
+                }
+                break;
+            case MessageType.DisplayReady:
+                if (Frame.ParseDisplayReady(payload) is { } ready) OnDisplayReady(ready);
+                break;
+            case MessageType.DisplayFocus:
+                if (Frame.ParseDisplayFocus(payload) is { } focus)
+                {
+                    _displayFocus = focus;
+                    UpdateViewerVisibility();
                 }
                 break;
             case MessageType.AudioFormat:
@@ -540,6 +588,9 @@ public partial class MainViewModel : ObservableObject
                 if (payload.Length >= 1)
                 {
                     var flags = (StatusFlags)payload[0];
+                    var displayFlagsChanged = (flags & DisplayFlagsMask) != (_macFlags & DisplayFlagsMask);
+                    _macFlags = flags;
+                    if (displayFlagsChanged) EvaluateDisplay();
                     var ax = flags.HasFlag(StatusFlags.AccessibilityGranted);
                     MacAccessibilityMissing = !ax;
                     MacStatusText = ax
@@ -631,7 +682,9 @@ public partial class MainViewModel : ObservableObject
             _capture.RemoteChanged += remote =>
             {
                 CursorOnMac = remote;
+                if (!remote) _displayFocus = false; // Mac potwierdzi stan przy następnym wejściu
                 UpdateStatus();
+                UpdateViewerVisibility();
             };
         }
         _capture.Enabled = InputSharingEnabled;
@@ -774,6 +827,7 @@ public partial class MainViewModel : ObservableObject
     private void UpdateStats()
     {
         if (CursorOnMac) UpdateStatus();
+        UpdateDisplayStats();
         if (!AudioActive || _jitter is null)
         {
             AudioLevel = 0;
@@ -784,6 +838,159 @@ public partial class MainViewModel : ObservableObject
             $"bufor {_jitter.BufferedMs} ms · pakiety {_audioRx.PacketsReceived} · utracone {_audioRx.PacketsLost} · odrzucone {_audioRx.PacketsRejected} · niedopełnienia {_jitter.Underruns} · przepełnienia {_jitter.Overruns}",
             $"buffer {_jitter.BufferedMs} ms · packets {_audioRx.PacketsReceived} · lost {_audioRx.PacketsLost} · rejected {_audioRx.PacketsRejected} · underruns {_jitter.Underruns} · overruns {_jitter.Overruns}");
         if (IsConnected) UpdateStatus();
+    }
+
+    // ------------------------------------------------------------------
+    // Ekran wirtualny Maca
+    // ------------------------------------------------------------------
+
+    private const StatusFlags DisplayFlagsMask = StatusFlags.DisplaySupported | StatusFlags.DisplayEnabled;
+
+    /// <summary>Uruchamia ekran wirtualny, gdy obie strony go obsługują i zezwalają.</summary>
+    private void EvaluateDisplay()
+    {
+        if (!IsConnected) return;
+        if (!DisplayEnabled)
+        {
+            SetDisplayStatus(T("Wyłączony w ustawieniach.", "Turned off in settings."), Gray);
+            return;
+        }
+        if (!_macFlags.HasFlag(StatusFlags.DisplaySupported))
+        {
+            SetDisplayStatus(T("Mac nie obsługuje ekranu wirtualnego – zaktualizuj aplikację na Macu.", "The Mac does not support the virtual display — update the Mac app."), Gray);
+            return;
+        }
+        if (!_macFlags.HasFlag(StatusFlags.DisplayEnabled))
+        {
+            if (_displayRequested) StopDisplay(notifyMac: false);
+            SetDisplayStatus(T("Wyłączony na Macu (Sterowanie → Ekran wirtualny dla Windowsa).", "Turned off on the Mac (Control → Virtual display for Windows)."), Gray);
+            return;
+        }
+        if (_displayRequested) return;
+        if (!OperatingSystem.IsWindows())
+        {
+            SetDisplayStatus(T("Podgląd ekranu Maca działa tylko na Windows.", "The Mac display viewer runs only on Windows."), Orange);
+            return;
+        }
+        try
+        {
+            var monitor = DisplayNative.PickForSide(SelectedMacSide.Value);
+            _displayMonitor = monitor.Bounds;
+            _client.Send(Frame.DisplayStart(monitor.Bounds.Width, monitor.Bounds.Height, monitor.ScalePercent,
+                InputCapture.EntryEdgeFor(SelectedMacSide.Value)));
+            _displayRequested = true;
+            SetDisplayStatus(T($"Uruchamianie ekranu Maca {monitor.Bounds.Width}×{monitor.Bounds.Height}…", $"Starting the {monitor.Bounds.Width}×{monitor.Bounds.Height} Mac display…"), Orange);
+            Log(T($"Ekran wirtualny: prośba o {monitor.Bounds.Width}×{monitor.Bounds.Height} ({monitor.ScalePercent}%)", $"Virtual display: requested {monitor.Bounds.Width}×{monitor.Bounds.Height} ({monitor.ScalePercent}%)"));
+        }
+        catch (Exception ex)
+        {
+            SetDisplayStatus(T("Nie można odczytać monitora: ", "Cannot read the monitor: ") + ex.Message, Red);
+        }
+    }
+
+    private void OnDisplayReady(DisplayReadyInfo info)
+    {
+        try
+        {
+            if (!_displayRequested) return; // spóźniona odpowiedź po wyłączeniu
+            if (!info.IsOk)
+            {
+                StopDisplayLocal();
+                SetDisplayStatus(T("Mac: ", "Mac: ") + info.Message, Red);
+                Log(T("Ekran wirtualny: ", "Virtual display: ") + info.Message);
+                return;
+            }
+            if (!OperatingSystem.IsWindows()) return;
+            _viewer ??= CreateViewer();
+            _viewer.Start(_displayMonitor);
+            _videoRx.Start(IPAddress.Parse(_client.RemoteAddress), info.Port, info.Key, info.Token);
+            _displayRunning = true;
+            _displayStatsClock.Restart();
+            _displayStatsBytes = _displayStatsFrames = 0;
+            SetDisplayStatus(T($"Działa · {info.Width}×{info.Height}", $"Running · {info.Width}×{info.Height}"), Green);
+            Log(T($"Ekran wirtualny Maca: {info.Width}×{info.Height}, port {info.Port}", $"Mac virtual display: {info.Width}×{info.Height}, port {info.Port}"));
+            UpdateViewerVisibility();
+        }
+        catch (Exception ex)
+        {
+            OnDisplayFailed(ex.Message);
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(info.Key);
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(info.Token);
+        }
+    }
+
+    private DisplayViewer CreateViewer()
+    {
+        var viewer = new DisplayViewer();
+        viewer.Failed += message => Post(() => OnDisplayFailed(message));
+        viewer.KeyframeNeeded += () => { if (_client.IsConnected) _client.Send(Frame.DisplayKeyframe()); };
+        return viewer;
+    }
+
+    /// <summary>Błąd po starcie: zatrzymujemy obie strony, bez automatycznego ponawiania.</summary>
+    private void OnDisplayFailed(string message)
+    {
+        if (!_displayRunning) return;
+        if (_client.IsConnected) _client.Send(Frame.DisplayStop());
+        StopDisplayLocal();
+        SetDisplayStatus(message, Red);
+        Log(T("Ekran wirtualny: ", "Virtual display: ") + message);
+    }
+
+    private void StopDisplay(bool notifyMac)
+    {
+        if (notifyMac && _displayRequested && _client.IsConnected) _client.Send(Frame.DisplayStop());
+        _displayRequested = false;
+        StopDisplayLocal();
+    }
+
+    private void StopDisplayLocal()
+    {
+        _displayRunning = false;
+        _displayFocus = false;
+        _videoRx.Stop();
+        _viewer?.Stop();
+        DisplayStatsText = "";
+    }
+
+    [RelayCommand]
+    private void RestartDisplay()
+    {
+        StopDisplay(notifyMac: true);
+        EvaluateDisplay();
+    }
+
+    /// <summary>Ekran Maca przykrywa monitor tylko podczas sterowania Makiem.</summary>
+    private void UpdateViewerVisibility()
+    {
+        if (_viewer is null) return;
+        var remote = _capture?.IsRemote == true;
+        _viewer.SetVisible(_displayRunning && remote && (_displayFocus || ShowMacDisplayWhileRemote));
+    }
+
+    private void UpdateDisplayStats()
+    {
+        if (!_displayRunning || _viewer is null) return;
+        var seconds = _displayStatsClock.Elapsed.TotalSeconds;
+        if (seconds < 1) return;
+        var bytes = _videoRx.BytesReceived;
+        var frames = _viewer.FramesPresented;
+        var fps = (frames - _displayStatsFrames) / seconds;
+        var mbps = (bytes - _displayStatsBytes) * 8 / seconds / 1_000_000;
+        _displayStatsBytes = bytes;
+        _displayStatsFrames = frames;
+        _displayStatsClock.Restart();
+        var decoding = _viewer.UsesGpuDecoding ? T("dekodowanie GPU", "GPU decoding") : T("dekodowanie CPU", "CPU decoding");
+        DisplayStatsText = T($"{fps:0} kl./s · {mbps:0.0} Mb/s · {decoding}", $"{fps:0} fps · {mbps:0.0} Mb/s · {decoding}");
+    }
+
+    private void SetDisplayStatus(string text, IBrush brush)
+    {
+        DisplayStatusText = text;
+        DisplayStatusBrush = brush;
     }
 
     // ------------------------------------------------------------------
@@ -830,6 +1037,28 @@ public partial class MainViewModel : ObservableObject
         _settings.MacSide = value.Value;
         SaveSettings();
         if (_capture is not null) _capture.Side = value.Value;
+        // Inna strona = inny monitor i inna krawędź ekranu wirtualnego na Macu.
+        if (!_loading && _displayRequested) RestartDisplay();
+    }
+
+    partial void OnDisplayEnabledChanged(bool value)
+    {
+        _settings.DisplayEnabled = value;
+        SaveSettings();
+        if (_loading) return;
+        if (value) EvaluateDisplay();
+        else
+        {
+            StopDisplay(notifyMac: true);
+            SetDisplayStatus(T("Wyłączony w ustawieniach.", "Turned off in settings."), Gray);
+        }
+    }
+
+    partial void OnShowMacDisplayWhileRemoteChanged(bool value)
+    {
+        _settings.ShowMacDisplayWhileRemote = value;
+        SaveSettings();
+        UpdateViewerVisibility();
     }
 
     partial void OnSelectedEmergencyHotkeyChanged(EmergencyHotkeyOption value)

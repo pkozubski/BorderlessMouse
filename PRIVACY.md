@@ -8,7 +8,9 @@ account, display advertising, include analytics SDKs or send usage telemetry.
 ## Data processed locally
 
 When enabled, BorderlessMouse processes keyboard and mouse events, clipboard
-text or images, device names, local IP addresses and system audio. These data
+text or images, device names, local IP addresses, system audio and the picture
+of the Mac virtual display (only the virtual display, never the built-in or
+other physical Mac screens). These data
 are transmitted only between the paired Windows computer and Mac on the local
 network. The application does not intentionally send their contents to the
 developer or a cloud service.

@@ -47,6 +47,11 @@ public enum MessageType : byte
     Pong = 0x51,
     Status = 0x60,
     Clipboard = 0x70,
+    DisplayStart = 0x80,
+    DisplayStop = 0x81,
+    DisplayReady = 0x82,
+    DisplayKeyframe = 0x83,
+    DisplayFocus = 0x84,
 }
 
 public enum ScreenEdge : byte
@@ -64,6 +69,17 @@ public enum StatusFlags : byte
     AccessibilityGranted = 1 << 0,
     AudioCapturing = 1 << 1,
     CursorOnMac = 1 << 2,
+    /// <summary>macOS potrafi utworzyć wirtualny monitor.</summary>
+    DisplaySupported = 1 << 3,
+    /// <summary>Użytkownik Maca zezwala na ekran wirtualny.</summary>
+    DisplayEnabled = 1 << 4,
+    DisplayStreaming = 1 << 5,
+}
+
+/// <summary>Odpowiedź Maca na DISPLAY_START (lub komunikat o zatrzymaniu, gdy Status != 0).</summary>
+public sealed record DisplayReadyInfo(byte Status, ushort Port, byte[] Key, byte[] Token, int Width, int Height, string Message)
+{
+    public bool IsOk => Status == 0;
 }
 
 public readonly record struct AudioFormatInfo(int SampleRate, int Channels, byte Format, byte Status, string Message)
@@ -219,6 +235,22 @@ public static class Frame
 
     public static byte[] AudioStop() => Make(MessageType.AudioStop, ReadOnlySpan<byte>.Empty);
 
+    /// <summary>Prośba o wirtualny monitor Maca o rozmiarze monitora Windows (piksele fizyczne).</summary>
+    public static byte[] DisplayStart(int width, int height, int scalePercent, ScreenEdge macEdgeFacingWindows, uint maxBitrateKbps = 0)
+    {
+        Span<byte> p = stackalloc byte[12];
+        BinaryPrimitives.WriteUInt16LittleEndian(p, (ushort)Math.Clamp(width, 320, 8192));
+        BinaryPrimitives.WriteUInt16LittleEndian(p[2..], (ushort)Math.Clamp(height, 240, 8192));
+        BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)Math.Clamp(scalePercent, 50, 400));
+        p[6] = (byte)macEdgeFacingWindows;
+        p[7] = 0; // H.264
+        BinaryPrimitives.WriteUInt32LittleEndian(p[8..], maxBitrateKbps);
+        return Make(MessageType.DisplayStart, p);
+    }
+
+    public static byte[] DisplayStop() => Make(MessageType.DisplayStop, ReadOnlySpan<byte>.Empty);
+    public static byte[] DisplayKeyframe() => Make(MessageType.DisplayKeyframe, ReadOnlySpan<byte>.Empty);
+
     public static byte[] Ping(ulong ts)
     {
         Span<byte> p = stackalloc byte[8];
@@ -235,6 +267,26 @@ public static class Frame
         if (p.Length < 5) return null;
         return ((ScreenEdge)p[0], BinaryPrimitives.ReadSingleLittleEndian(p[1..]));
     }
+
+    /// <summary>Opcjonalny szósty bajt LEAVE: bit 0 = kursor wyszedł z ekranu wirtualnego.</summary>
+    public static bool LeaveFromVirtualDisplay(ReadOnlySpan<byte> p) => p.Length >= 6 && (p[5] & 0x01) != 0;
+
+    public static DisplayReadyInfo? ParseDisplayReady(ReadOnlySpan<byte> p)
+    {
+        const int fixedBytes = 1 + 2 + VideoStream.KeyBytes + VideoStream.TokenBytes + 2 + 2;
+        if (p.Length < fixedBytes || p.Length > fixedBytes + 200) return null;
+        var offset = 3;
+        var key = p.Slice(offset, VideoStream.KeyBytes).ToArray();
+        offset += VideoStream.KeyBytes;
+        var token = p.Slice(offset, VideoStream.TokenBytes).ToArray();
+        offset += VideoStream.TokenBytes;
+        var width = BinaryPrimitives.ReadUInt16LittleEndian(p[offset..]);
+        var height = BinaryPrimitives.ReadUInt16LittleEndian(p[(offset + 2)..]);
+        var message = Encoding.UTF8.GetString(p[fixedBytes..]);
+        return new DisplayReadyInfo(p[0], BinaryPrimitives.ReadUInt16LittleEndian(p[1..]), key, token, width, height, message);
+    }
+
+    public static bool? ParseDisplayFocus(ReadOnlySpan<byte> p) => p.Length >= 1 ? p[0] != 0 : null;
 
     public static AudioFormatInfo? ParseAudioFormat(ReadOnlySpan<byte> p)
     {

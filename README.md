@@ -13,6 +13,9 @@ Scenariusz, na który jest zbudowana ta wersja:
 * **Windows → Mac**: fizyczna klawiatura i mysz podpięte do Windowsa sterują Makiem
   (kursor przechodzi przez krawędź ekranu jak w Synergy/Barrier).
 * **Mac → Windows**: cały dźwięk systemowy Maca gra na słuchawkach/głośnikach Windowsa.
+* **Ekran wirtualny Maca na Windowsie** (eksperymentalne): monitor Windowsa staje się drugim
+  ekranem Maca. Przeciągnij okno na Macu w stronę Windowsa, a pojawi się na ekranie Windowsa.
+  Szczegóły w sekcji [Ekran wirtualny](#ekran-wirtualny-maca-na-windowsie).
 * **Schowek w obie strony**: kopiuj i wklejaj tekst, zdjęcia i zrzuty ekranu
   między komputerami (bez przełączania kursora). Zmiany wykrywamy co ok. 0,5 s;
   czas przesłania obrazu zależy od jego wielkości i sieci.
@@ -183,6 +186,48 @@ Aplikacja ma też ikonę w pasku menu z szybkimi przełącznikami.
 
 Ustawienia są zapisywane w `%APPDATA%\BorderlessMouse\settings.json`; zamknięcie okna chowa
 aplikację do zasobnika (wyjście przez menu ikony).
+
+### Ekran wirtualny Maca na Windowsie
+
+Mac tworzy dodatkowy, wirtualny monitor (bez sterownika) o rozdzielczości monitora Windows
+stojącego po stronie Maca i ustawia go przy krawędzi zwróconej do Windowsa. Obraz tego
+monitora jest nagrywany, kodowany sprzętowo do H.264 i wysyłany szyfrowanym połączeniem TCP.
+Windows dekoduje go na GPU (Media Foundation + Direct3D 11) i pokazuje na całym monitorze.
+
+Jak z tego korzystać:
+
+1. Na Macu nadaj zgodę **Nagrywanie ekranu** (karta Uprawnienia → Poproś) i uruchom aplikację
+   ponownie. Ekran wirtualny jest domyślnie włączony po obu stronach (karta Sterowanie).
+2. Połącz Windows z Makiem. Windows sam poprosi o ekran – na Macu pojawi się nowy monitor
+   „BorderlessMouse”, widoczny też w *Ustawienia systemowe → Wyświetlacze*.
+3. Przejdź kursorem z Windowsa na Maca jak zwykle (kursor trafia na ekran MacBooka).
+4. Przeciągnij okno dalej w stronę Windowsa: gdy kursor wejdzie na ekran wirtualny, monitor
+   Windowsa pokaże pulpit Maca z tym oknem.
+5. Dalsza krawędź ekranu wirtualnego (albo skrót awaryjny) wraca do Windowsa – obraz Maca
+   znika, a kursor Windows pojawia się tam, gdzie był na obrazie.
+
+Opcja **Pokazuj go przez cały czas sterowania Makiem** (Windows) wyświetla ekran Maca od
+razu po przejściu na Maca, nie dopiero po wejściu kursorem na ekran wirtualny.
+
+Dobrze wiedzieć:
+
+* Opóźnienie to czas kodowania (ok. 10 ms dla 2560×1440 na Apple Silicon), sieci i dekodowania.
+  Najlepiej działa po kablu; po Wi-Fi obraz może chwilami gubić płynność.
+* Nieruchomy ekran nie zużywa sieci. Przy ruchu 1440p to zwykle kilka–kilkanaście Mb/s,
+  maksymalnie ok. 22 Mb/s (4K: do 50 Mb/s).
+* Przy skalowaniu Windows 150% i więcej Mac domyślnie używa trybu HiDPI (ostry tekst,
+  większe elementy). Inny tryb wybierzesz w *Ustawienia systemowe → Wyświetlacze*.
+* `CGVirtualDisplay` to prywatne API macOS (używają go m.in. DeskPad i BetterDisplay).
+  Jeśli zniknie w przyszłej wersji systemu, reszta aplikacji działa dalej, a ekran wirtualny
+  zgłosi brak obsługi.
+* Zgoda na nagrywanie ekranu, podobnie jak zgoda na dźwięk, jest przypisana do podpisu
+  aplikacji – po zmianie podpisu (lokalny build ↔ wydanie z GitHuba) trzeba ją nadać ponownie.
+* Windows wymaga dekodera H.264 Media Foundation (jest w każdym Windows 10/11 poza
+  wersjami „N” bez Media Feature Pack). Bez sprzętowego dekodowania działa wolniejszy,
+  programowy tryb.
+
+Samotest na Macu (tworzy na chwilę monitor, sprawdza koder i szyfrowany kanał):
+`BorderlessMouse.app/Contents/MacOS/BorderlessMouse --display-selftest`.
 
 ### Gry i pełny ekran
 

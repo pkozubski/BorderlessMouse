@@ -37,6 +37,11 @@ final class AppState: ObservableObject {
     @Published private(set) var audioSendErrors: UInt64 = 0
     @Published private(set) var audioPermission: SystemAudioTap.Permission = .unknown
     @Published private(set) var accessibilityGranted = false
+    @Published private(set) var screenCaptureGranted = false
+    @Published private(set) var displayStreaming = false
+    @Published private(set) var displayDescription = ""
+    @Published private(set) var displayError: String?
+    @Published private(set) var displayStats: DisplayStreamer.Stats?
     @Published private(set) var clipboardStatus = L10n.text("Brak synchronizacji w tej sesji", "No synchronization in this session")
     @Published private(set) var loginItemStatus = LoginItem.statusDescription
     @Published var loginItemError: String?
@@ -75,6 +80,7 @@ final class AppState: ObservableObject {
         settings.launchAtLogin = LoginItem.isEnabled
         LoginItem.refreshIfNeeded()
         accessibilityGranted = InputInjector.isAccessibilityTrusted
+        screenCaptureGranted = DisplayCapture.hasPermission
         guard !preview else { return }
         engine.setAccessibilityGranted(accessibilityGranted)
         engine.start()
@@ -121,6 +127,10 @@ final class AppState: ObservableObject {
         audioDescription = "48000 Hz · stereo · 16-bit → 192.168.1.42:47802"
         audioLevel = 0.42
         audioPackets = 18_432
+        screenCaptureGranted = true
+        displayStreaming = true
+        displayDescription = "2560×1440 · H.264 22 Mb/s"
+        displayStats = DisplayStreamer.Stats(framesPerSecond: 58, kilobitsPerSecond: 6_420, dropped: 0, width: 2560, height: 1440)
         clipboardStatus = L10n.text("Wysłano 128 zn. do Windowsa · 21:40:12", "Sent 128 characters to Windows · 21:40:12")
         loginItemStatus = LoginItem.statusDescription
         log = [
@@ -169,6 +179,13 @@ final class AppState: ObservableObject {
     // MARK: - Akcje
 
     func refreshPermissions() {
+        let screen = DisplayCapture.hasPermission
+        if screen != screenCaptureGranted {
+            screenCaptureGranted = screen
+            appendLog(screen
+                      ? L10n.text("Zgoda na nagrywanie ekranu nadana", "Screen Recording permission granted")
+                      : L10n.text("Brak zgody na nagrywanie ekranu", "Screen Recording permission missing"))
+        }
         let granted = InputInjector.isAccessibilityTrusted
         if granted != accessibilityGranted {
             accessibilityGranted = granted
@@ -191,6 +208,36 @@ final class AppState: ObservableObject {
     func openAudioCaptureSettings() {
         open("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
     }
+
+    func requestScreenCapture() {
+        // macOS pyta tylko raz; przy odmowie od razu otwieramy właściwy panel.
+        if !DisplayCapture.requestPermission() { openScreenCaptureSettings() }
+        refreshPermissions()
+    }
+
+    func openScreenCaptureSettings() {
+        open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+    }
+
+    var displayStatusText: String {
+        if displayStreaming {
+            var text = L10n.text("Działa: \(displayDescription)", "Running: \(displayDescription)")
+            if let stats = displayStats {
+                text += L10n.text(" · \(stats.framesPerSecond) kl./s · \(stats.kilobitsPerSecond / 1000) Mb/s",
+                                  " · \(stats.framesPerSecond) fps · \(stats.kilobitsPerSecond / 1000) Mb/s")
+            }
+            return text
+        }
+        if let displayError { return displayError }
+        if !VirtualDisplay.isSupported {
+            return L10n.text("Ta wersja macOS nie udostępnia wirtualnych monitorów.",
+                             "This macOS version does not provide virtual displays.")
+        }
+        return L10n.text("Nieaktywny – Windows tworzy go po połączeniu, jeśli ma włączony ekran Maca.",
+                         "Inactive — Windows starts it after connecting when the Mac display is enabled there.")
+    }
+
+    func stopDisplay() { engine.stopDisplay() }
 
     // MARK: - Zgoda na dźwięk systemowy
 
@@ -363,6 +410,8 @@ final class AppState: ObservableObject {
         case .peerDisconnected:
             peer = nil
             cursorOnMac = false
+            displayStreaming = false
+            displayStats = nil
         case let .cursorOnMac(active):
             cursorOnMac = active
         case let .audioStarted(desc):
@@ -394,6 +443,21 @@ final class AppState: ObservableObject {
                                         "Received \(summary) from Windows · \(Self.timeFormatter.string(from: Date()))")
         case let .clipboardError(message):
             clipboardStatus = message
+        case let .displayStarted(desc):
+            displayStreaming = true
+            displayDescription = desc
+            displayError = nil
+            displayStats = nil
+        case .displayStopped:
+            displayStreaming = false
+            displayDescription = ""
+            displayStats = nil
+        case let .displayError(message):
+            displayStreaming = false
+            displayError = message
+            displayStats = nil
+        case let .displayStats(stats):
+            displayStats = stats
         case let .log(text):
             appendLog(text)
         }

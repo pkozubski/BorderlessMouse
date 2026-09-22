@@ -42,6 +42,11 @@ enum MessageType: UInt8 {
     case pong = 0x51
     case status = 0x60
     case clipboard = 0x70
+    case displayStart = 0x80
+    case displayStop = 0x81
+    case displayReady = 0x82
+    case displayKeyframe = 0x83
+    case displayFocus = 0x84
 }
 
 enum ClipboardFormat: UInt8 {
@@ -81,6 +86,59 @@ struct StatusFlags: OptionSet {
     static let accessibilityGranted = StatusFlags(rawValue: 1 << 0)
     static let audioCapturing = StatusFlags(rawValue: 1 << 1)
     static let cursorOnMac = StatusFlags(rawValue: 1 << 2)
+    /// macOS udostępnia wirtualny monitor (prywatne API CGVirtualDisplay).
+    static let displaySupported = StatusFlags(rawValue: 1 << 3)
+    /// Użytkownik Maca zezwala na ekran wirtualny dla Windowsa.
+    static let displayEnabled = StatusFlags(rawValue: 1 << 4)
+    static let displayStreaming = StatusFlags(rawValue: 1 << 5)
+}
+
+/// Prośba Windowsa o wirtualny monitor Maca wyświetlany na ekranie Windows.
+struct DisplayStartRequest: Equatable {
+    /// Rozdzielczość monitora Windows w pikselach fizycznych.
+    let pixelWidth: Int
+    let pixelHeight: Int
+    /// Skalowanie Windows w procentach (100 = 96 DPI).
+    let scalePercent: Int
+    /// Krawędź Maca zwrócona w stronę Windowsa – tam stanie wirtualny monitor.
+    let edge: ScreenEdge
+    let codec: UInt8
+    /// 0 = automatycznie.
+    let maxBitrateKbps: UInt32
+
+    static let payloadBytes = 12
+
+    init(pixelWidth: Int, pixelHeight: Int, scalePercent: Int, edge: ScreenEdge, codec: UInt8 = 0, maxBitrateKbps: UInt32 = 0) {
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.scalePercent = scalePercent
+        self.edge = edge
+        self.codec = codec
+        self.maxBitrateKbps = maxBitrateKbps
+    }
+
+    init?(payload: [UInt8]) {
+        var r = ByteReader(payload)
+        guard payload.count >= Self.payloadBytes,
+              let w = r.u16(), let h = r.u16(), let scale = r.u16(),
+              let edgeRaw = r.u8(), let edge = ScreenEdge(rawValue: edgeRaw),
+              let codec = r.u8(), let bitrate = r.u32(),
+              (320...8192).contains(Int(w)), (240...8192).contains(Int(h)),
+              (50...400).contains(Int(scale)), codec == 0 else { return nil }
+        self.init(pixelWidth: Int(w), pixelHeight: Int(h), scalePercent: Int(scale),
+                  edge: edge, codec: codec, maxBitrateKbps: bitrate)
+    }
+
+    var payload: [UInt8] {
+        var w = ByteWriter()
+        w.u16(UInt16(clamping: pixelWidth))
+        w.u16(UInt16(clamping: pixelHeight))
+        w.u16(UInt16(clamping: scalePercent))
+        w.u8(edge.rawValue)
+        w.u8(codec)
+        w.u32(maxBitrateKbps)
+        return w.bytes
+    }
 }
 
 /// Prosty czytnik little-endian po tablicy bajtów.
@@ -218,10 +276,12 @@ enum Frame {
         make(.reject, Array(String(decoding: reason.utf8.prefix(200), as: UTF8.self).utf8))
     }
 
-    static func leave(edge: ScreenEdge, ratio: Float) -> Data {
+    /// Szósty bajt (flagi) jest opcjonalny – starsze wersje Windows go pomijają.
+    static func leave(edge: ScreenEdge, ratio: Float, fromVirtualDisplay: Bool = false) -> Data {
         var w = ByteWriter()
         w.u8(edge.rawValue)
         w.f32(ratio)
+        w.u8(fromVirtualDisplay ? 0x01 : 0x00)
         return make(.leave, w.bytes)
     }
 
@@ -240,6 +300,28 @@ enum Frame {
     }
 
     static func pong(_ payload: [UInt8]) -> Data { make(.pong, payload) }
+
+    /// status 0 = gotowe; inny status = błąd lub zatrzymanie, opis w `message`.
+    static func displayReady(status: UInt8, port: UInt16, key: Data, token: Data,
+                             pixelWidth: Int, pixelHeight: Int, message: String) -> Data {
+        precondition(key.isEmpty || key.count == VideoStream.keyBytes)
+        precondition(token.isEmpty || token.count == VideoStream.tokenBytes)
+        var w = ByteWriter()
+        w.u8(status)
+        w.u16(port)
+        w.raw(key.isEmpty ? [UInt8](repeating: 0, count: VideoStream.keyBytes) : Array(key))
+        w.raw(token.isEmpty ? [UInt8](repeating: 0, count: VideoStream.tokenBytes) : Array(token))
+        w.u16(UInt16(clamping: pixelWidth))
+        w.u16(UInt16(clamping: pixelHeight))
+        w.string(String(decoding: message.utf8.prefix(200), as: UTF8.self))
+        return make(.displayReady, w.bytes)
+    }
+
+    static func displayFailed(_ message: String) -> Data {
+        displayReady(status: 1, port: 0, key: Data(), token: Data(), pixelWidth: 0, pixelHeight: 0, message: message)
+    }
+
+    static func displayFocus(_ active: Bool) -> Data { make(.displayFocus, [active ? 1 : 0]) }
 
     static func ping(_ ts: UInt64) -> Data {
         var w = ByteWriter()

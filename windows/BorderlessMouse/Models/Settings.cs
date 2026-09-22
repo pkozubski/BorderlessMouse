@@ -40,6 +40,11 @@ public sealed class Settings
 
     public bool ClipboardSyncEnabled { get; set; } = true;
 
+    /// <summary>Monitor po stronie Maca może wyświetlać wirtualny ekran Maca.</summary>
+    public bool DisplayEnabled { get; set; } = true;
+    /// <summary>false = ekran Maca tylko, gdy kursor jest na nim; true = przez cały czas sterowania Makiem.</summary>
+    public bool ShowMacDisplayWhileRemote { get; set; }
+
     public bool AutoCheckUpdates { get; set; } = true;
 
     public bool StartMinimized { get; set; } = true;

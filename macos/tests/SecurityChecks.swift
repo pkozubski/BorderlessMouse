@@ -69,6 +69,60 @@ struct SecurityChecks {
         alteredUpdateVector[0] ^= 1
         expect(!ArtifactSignature.verify(data: alteredUpdateVector, signatureData: updateSignature), "tampered release artifact rejected")
         expect(!ArtifactSignature.verify(data: updateVector, signatureData: Data(updateSignature.dropLast())), "truncated release signature rejected")
+        checkVirtualDisplayProtocol()
         print("✓ Security: pairing, encrypted sessions, replay protection and signed update artifacts")
+    }
+
+    static func checkVirtualDisplayProtocol() {
+        let request = DisplayStartRequest(pixelWidth: 2560, pixelHeight: 1440, scalePercent: 125, edge: .right, maxBitrateKbps: 20_000)
+        expect(request.payload.count == DisplayStartRequest.payloadBytes, "display start payload size")
+        expect(DisplayStartRequest(payload: request.payload) == request, "display start round trip")
+        var badCodec = request.payload
+        badCodec[7] = 9
+        expect(DisplayStartRequest(payload: badCodec) == nil, "unknown video codec rejected")
+        expect(DisplayStartRequest(payload: Array(request.payload.prefix(8))) == nil, "truncated display start rejected")
+
+        let key = Data((0..<32).map { UInt8($0 * 7 & 0xFF) })
+        let token = Data(repeating: 0x5A, count: VideoStream.tokenBytes)
+        let ready = Frame.displayReady(status: 0, port: 50123, key: key, token: token, pixelWidth: 2560, pixelHeight: 1440, message: "")
+        let readyPayload = Frame.parseSingle(ready)!.1
+        expect(readyPayload.count == 1 + 2 + 32 + 16 + 2 + 2, "display ready layout")
+        expect(Data(readyPayload[3..<35]) == key && Data(readyPayload[35..<51]) == token, "display ready carries key and token")
+        expect(Frame.parseSingle(Frame.displayFailed("x"))!.1.first == 1, "display failure status")
+
+        var sealer = VideoStream.Sealer(key: key)
+        let first = sealer.seal(Data("BorderlessMouse video vector".utf8))!
+        expect(first == data("34000000000000000000000036871e7baf0e68795351fe3aa757db1c7770d96fcdfc5ca5825e10e56bbecdbf5450f64c9f54fa2c4c9ccc41"),
+               "video record vector")
+        let second = sealer.seal(Data([1, 2, 3]))!
+        var opener = VideoStream.Opener(key: key)
+        expect(opener.open(first.dropFirst(4)) == Data("BorderlessMouse video vector".utf8), "video record opens")
+        var replay = opener
+        expect(replay.open(first.dropFirst(4)) == nil, "replayed video record rejected")
+        var tampered = Data(second.dropFirst(4))
+        tampered[tampered.count - 1] ^= 1
+        expect(opener.open(tampered) == nil, "tampered video record rejected")
+        expect(opener.open(second.dropFirst(4)) == Data([1, 2, 3]), "next video record opens")
+
+        let fixtureURL = URL(fileURLWithPath: "tests/fixtures/video.json")
+        guard let json = try? JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as? [String: Any],
+              let keyHex = json["keyHex"] as? String, let records = json["records"] as? [String],
+              let keyframes = json["keyframes"] as? [Bool] else {
+            expect(false, "video fixture readable")
+            return
+        }
+        var fixtureOpener = VideoStream.Opener(key: data(keyHex))
+        for (index, hex) in records.enumerated() {
+            let record = data(hex)
+            let length = Int(record[0]) | Int(record[1]) << 8 | Int(record[2]) << 16 | Int(record[3]) << 24
+            expect(length == record.count - 4, "fixture record \(index) length")
+            guard let clear = fixtureOpener.open(record.dropFirst(4)), let frame = VideoStream.Frame(decoding: clear) else {
+                expect(false, "fixture record \(index) decrypts")
+                return
+            }
+            expect(frame.kind == .h264AccessUnit && frame.width == 160 && frame.height == 96, "fixture frame \(index) header")
+            expect(frame.isKeyframe == keyframes[index], "fixture frame \(index) keyframe flag")
+            expect(frame.payload.starts(with: [0, 0, 0, 1]), "fixture frame \(index) is Annex B")
+        }
     }
 }

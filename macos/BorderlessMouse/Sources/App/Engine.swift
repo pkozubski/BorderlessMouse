@@ -15,6 +15,7 @@ final class Engine {
         var scrollPixelsPerNotch: Double
         var audioBufferFrames: UInt32
         var clipboardSync: Bool
+        var displayEnabled: Bool
         var pairingKey: Data
     }
 
@@ -32,6 +33,10 @@ final class Engine {
         case clipboardSent(summary: String)
         case clipboardReceived(summary: String)
         case clipboardError(String)
+        case displayStarted(String)
+        case displayStopped
+        case displayError(String)
+        case displayStats(DisplayStreamer.Stats)
         case log(String)
     }
 
@@ -52,6 +57,10 @@ final class Engine {
     private var accessibilityGranted = false
     private var audioGeneration: UInt64 = 0
     private let audioQueue = DispatchQueue(label: "blm.audio.control", qos: .userInitiated)
+    private let display = DisplayStreamer()
+    /// Ekran wirtualny: nil = brak, false = uruchamianie, true = działa.
+    private var displayRunning: Bool?
+    private var displayGeneration: UInt64 = 0
 
     init(config: Config) {
         self.config = config
@@ -96,6 +105,7 @@ final class Engine {
         clipboard.stop()
         eventsQueue.sync {
             self.stopAudioLocked(notify: false)
+            self.stopDisplayLocked(notify: false, reason: nil)
             self.injector.deactivate()
             self.discovery.stop()
             self.server.stop()
@@ -134,6 +144,10 @@ final class Engine {
             if self.tap != nil, old.muteLocalAudio != newConfig.muteLocalAudio || old.audioBufferFrames != newConfig.audioBufferFrames {
                 self.restartAudio()
             }
+            if old.displayEnabled && !newConfig.displayEnabled, self.displayRunning != nil {
+                self.stopDisplayLocked(notify: true, reason: L10n.text("Ekran wirtualny wyłączono na Macu.",
+                                                                      "The virtual display was turned off on the Mac."))
+            }
             if old.clipboardSync != newConfig.clipboardSync {
                 if newConfig.clipboardSync { self.clipboard.start() } else { self.clipboard.stop() }
             }
@@ -155,6 +169,12 @@ final class Engine {
 
     func stopAudio() {
         eventsQueue.async { self.stopAudioLocked(notify: true) }
+    }
+
+    func stopDisplay() {
+        eventsQueue.async {
+            self.stopDisplayLocked(notify: true, reason: L10n.text("Zatrzymano na Macu.", "Stopped on the Mac."))
+        }
     }
 
     /// Sprawdza (i w razie potrzeby wywołuje) zgodę na nagrywanie dźwięku
@@ -193,15 +213,31 @@ final class Engine {
             self.peer = nil
             self.injector.deactivate()
             self.stopAudioLocked(notify: true)
+            self.stopDisplayLocked(notify: true, reason: nil)
             self.emit(.peerDisconnected)
             self.emit(.log(L10n.text("Rozłączono", "Disconnected")))
         }
         server.onMessage = { [weak self] type, payload, sessionKeys in
             self?.handle(type, payload, sessionKeys: sessionKeys)
         }
-        injector.onLeave = { [weak self] edge, ratio in
+        injector.onLeave = { [weak self] edge, ratio, fromVirtual in
             guard let self else { return }
-            self.server.send(Frame.leave(edge: edge, ratio: ratio))
+            self.server.send(Frame.leave(edge: edge, ratio: ratio, fromVirtualDisplay: fromVirtual))
+        }
+        injector.onVirtualDisplayFocus = { [weak self] focused in
+            self?.server.send(Frame.displayFocus(focused))
+        }
+        display.onStopped = { [weak self] message in
+            self?.eventsQueue.async {
+                guard let self, self.displayRunning != nil else { return }
+                self.stopDisplayLocked(notify: true, reason: message)
+            }
+        }
+        display.onStats = { [weak self] stats in
+            self?.eventsQueue.async { self?.emit(.displayStats(stats)) }
+        }
+        display.onDisplayChanged = { [weak self] in
+            self?.eventsQueue.async { self?.injector.refreshDisplays() }
         }
         injector.onActiveChanged = { [weak self] active in
             self?.emit(.cursorOnMac(active))
@@ -238,6 +274,9 @@ final class Engine {
         if accessibilityGranted { flags.insert(.accessibilityGranted) }
         if tap != nil { flags.insert(.audioCapturing) }
         if injector.isActive { flags.insert(.cursorOnMac) }
+        if VirtualDisplay.isSupported { flags.insert(.displaySupported) }
+        if config.displayEnabled { flags.insert(.displayEnabled) }
+        if displayRunning == true { flags.insert(.displayStreaming) }
         server.send(Frame.status(flags))
     }
 
@@ -290,9 +329,95 @@ final class Engine {
         case .clipboard:
             guard config.clipboardSync, let content = ClipboardContent(payload: payload) else { return }
             clipboard.apply(content)
+        case .displayStart:
+            guard let request = DisplayStartRequest(payload: payload) else {
+                server.send(Frame.displayFailed(L10n.text("Nieprawidłowa prośba o ekran wirtualny.",
+                                                          "Invalid virtual display request.")))
+                return
+            }
+            startDisplay(request)
+        case .displayStop:
+            stopDisplayLocked(notify: true, reason: nil)
+        case .displayKeyframe:
+            display.requestKeyframe()
         default:
             break
         }
+    }
+
+    // MARK: - Ekran wirtualny (eventsQueue)
+
+    private func startDisplay(_ request: DisplayStartRequest) {
+        guard config.displayEnabled else {
+            server.send(Frame.displayFailed(L10n.text("Ekran wirtualny jest wyłączony na Macu.",
+                                                      "The virtual display is turned off on the Mac.")))
+            return
+        }
+        guard VirtualDisplay.isSupported else {
+            server.send(Frame.displayFailed(VirtualDisplay.DisplayError.unsupported.localizedDescription))
+            return
+        }
+        stopDisplayLocked(notify: false, reason: nil)
+        guard DisplayCapture.hasPermission else {
+            // Pytanie macOS pojawia się tylko raz; potem trzeba wejść do Ustawień.
+            DispatchQueue.main.async { DisplayCapture.requestPermission() }
+            let message = DisplayCapture.CaptureError.permissionDenied.localizedDescription
+            server.send(Frame.displayFailed(message))
+            emit(.displayError(message))
+            emit(.log(L10n.text("Ekran wirtualny: \(message)", "Virtual display: \(message)")))
+            return
+        }
+        displayGeneration &+= 1
+        let generation = displayGeneration
+        displayRunning = false
+        let name = L10n.text("BorderlessMouse (\(peer?.name ?? "Windows"))", "BorderlessMouse (\(peer?.name ?? "Windows"))")
+        emit(.log(L10n.text("Tworzenie ekranu wirtualnego \(request.pixelWidth)×\(request.pixelHeight) (skala \(request.scalePercent)%)",
+                            "Creating a \(request.pixelWidth)×\(request.pixelHeight) virtual display (\(request.scalePercent)% scale)")))
+        display.start(request, name: name) { [weak self] result in
+            self?.eventsQueue.async {
+                guard let self, self.displayGeneration == generation, self.peer != nil else {
+                    if case .success = result { self?.display.stop() }
+                    return
+                }
+                switch result {
+                case let .success(ready):
+                    self.displayRunning = true
+                    self.injector.virtualDisplayID = ready.displayID
+                    self.server.send(Frame.displayReady(status: 0, port: ready.port, key: ready.key, token: ready.token,
+                                                        pixelWidth: ready.width, pixelHeight: ready.height, message: ""))
+                    let desc = "\(ready.width)×\(ready.height) · H.264 \(ready.bitrate / 1_000_000) Mb/s"
+                    self.emit(.displayStarted(desc))
+                    self.emit(.log(L10n.text("Ekran wirtualny gotowy: \(desc), port \(ready.port)",
+                                             "Virtual display ready: \(desc), port \(ready.port)")))
+                case let .failure(error):
+                    self.displayRunning = nil
+                    let message = error.localizedDescription
+                    self.server.send(Frame.displayFailed(message))
+                    self.emit(.displayError(message))
+                    self.emit(.log(L10n.text("Ekran wirtualny: \(message)", "Virtual display: \(message)")))
+                }
+                self.sendStatus()
+            }
+        }
+    }
+
+    /// `reason` != nil: Windows dostaje komunikat, że strumień się zakończył.
+    private func stopDisplayLocked(notify: Bool, reason: String?) {
+        displayGeneration &+= 1
+        guard displayRunning != nil else { return }
+        displayRunning = nil
+        injector.virtualDisplayID = nil
+        display.stop()
+        if let reason, peer != nil { server.send(Frame.displayFailed(reason)) }
+        guard notify else { return }
+        if let reason {
+            emit(.displayError(reason))
+            emit(.log(L10n.text("Ekran wirtualny zatrzymany: \(reason)", "Virtual display stopped: \(reason)")))
+        } else {
+            emit(.displayStopped)
+            emit(.log(L10n.text("Ekran wirtualny zatrzymany", "Virtual display stopped")))
+        }
+        sendStatus()
     }
 
     // MARK: - Audio (eventsQueue)

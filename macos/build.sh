@@ -61,6 +61,8 @@ compile() { # $1 = arch, $2 = output
     -framework SwiftUI -framework AppKit -framework Network \
     -framework CoreAudio -framework AudioToolbox -framework CryptoKit \
     -framework ServiceManagement -framework Security \
+    -framework ScreenCaptureKit -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
+    -import-objc-header BorderlessMouse/Sources/Display/CGVirtualDisplay.h \
     -o "$2" $SOURCES
 }
 

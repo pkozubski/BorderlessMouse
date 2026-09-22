@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Mac virtual display on Windows** (experimental). macOS creates a driverless virtual display
+  (`CGVirtualDisplay`) next to the edge facing Windows, captures it with ScreenCaptureKit,
+  encodes it with hardware H.264 (VideoToolbox, low-latency rate control) and streams it over
+  a separate, one-time TCP connection encrypted with a per-stream AES-256-GCM key. Windows
+  decodes it with Media Foundation on the GPU (software fallback) and shows it full screen on
+  the monitor next to the Mac while the pointer is on the virtual display.
+- Protocol: `DISPLAY_START/STOP/READY/KEYFRAME/FOCUS` (0x80–0x84), new `STATUS` bits and an
+  optional flags byte in `LEAVE`. Windows only uses them when the Mac advertises support, so
+  mixed versions keep working.
+- macOS: Screen Recording permission row, "Share a virtual display" toggle and stream status;
+  `--display-selftest` diagnostic.
+- Windows: "Mac display" card with a toggle, "show it whenever you control the Mac" option,
+  status, throughput and restart.
+- Shared test vectors (CryptoKit ↔ .NET) and an H.264 fixture encoded on macOS that the Windows
+  checks decrypt and, on Windows, decode.
+
 ## 2.0.2 — 2026-09-04
 
 ### Fixed

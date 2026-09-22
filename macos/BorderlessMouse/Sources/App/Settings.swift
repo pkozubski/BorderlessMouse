@@ -30,6 +30,8 @@ struct Settings: Codable, Equatable {
     var scrollSpeed: Double = 1.0
     var audioBufferFrames: Int = 256
     var clipboardSyncEnabled = true
+    /// Windows może poprosić o wirtualny monitor Maca wyświetlany na swoim ekranie.
+    var displayEnabled = true
     var autoCheckUpdates = true
     var launchAtLogin = false
     /// Przy starcie z logowania nie otwieraj okna – tylko ikona w pasku menu.
@@ -44,7 +46,7 @@ struct Settings: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case deviceName, controlPort, inputEnabled, audioEnabled, muteLocalAudio
         case swapCtrlCmd, scrollDirection, scrollSpeed, audioBufferFrames
-        case clipboardSyncEnabled, autoCheckUpdates, launchAtLogin, startHidden
+        case clipboardSyncEnabled, displayEnabled, autoCheckUpdates, launchAtLogin, startHidden
         case hasCompletedOnboarding, codesignIdentity
     }
 
@@ -60,6 +62,7 @@ struct Settings: Codable, Equatable {
         scrollSpeed = try values.decodeIfPresent(Double.self, forKey: .scrollSpeed) ?? scrollSpeed
         audioBufferFrames = try values.decodeIfPresent(Int.self, forKey: .audioBufferFrames) ?? audioBufferFrames
         clipboardSyncEnabled = try values.decodeIfPresent(Bool.self, forKey: .clipboardSyncEnabled) ?? clipboardSyncEnabled
+        displayEnabled = try values.decodeIfPresent(Bool.self, forKey: .displayEnabled) ?? displayEnabled
         autoCheckUpdates = try values.decodeIfPresent(Bool.self, forKey: .autoCheckUpdates) ?? autoCheckUpdates
         launchAtLogin = try values.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? launchAtLogin
         startHidden = try values.decodeIfPresent(Bool.self, forKey: .startHidden) ?? startHidden
@@ -92,6 +95,7 @@ struct Settings: Codable, Equatable {
                       scrollPixelsPerNotch: 40 * scrollSpeed,
                       audioBufferFrames: UInt32(clamping: audioBufferFrames),
                       clipboardSync: clipboardSyncEnabled,
+                      displayEnabled: displayEnabled,
                       pairingKey: PairingKeyStore.shared.key)
     }
 }

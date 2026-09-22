@@ -12,6 +12,9 @@ struct BorderlessMouseApp: App {
         if CommandLine.arguments.contains("--login-item-test") {
             LoginItem.runDiagnostics()
         }
+        if CommandLine.arguments.contains("--display-selftest") {
+            DisplaySelfTest.run()
+        }
         if CommandLine.arguments.contains("--ui-preview") {
             UIPreview.run()
         }

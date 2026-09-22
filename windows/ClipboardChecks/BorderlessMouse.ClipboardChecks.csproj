@@ -3,6 +3,8 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <!-- Kod tylko dla Windows jest oznaczony [SupportedOSPlatform("windows")]; testy uruchamiają się też na macOS. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
@@ -10,5 +12,6 @@
     <ProjectReference Include="../BorderlessMouse/BorderlessMouse.csproj" />
     <PackageReference Include="Avalonia.Headless" Version="11.3.12" />
     <None Include="../../tests/fixtures/clipboard.json" Link="clipboard.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../tests/fixtures/video.json" Link="video.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -215,7 +215,10 @@ public sealed class InputCapture : IDisposable
     }
 
     /// <summary>Krawędź Maca, przez którą kursor wchodzi (przeciwna do strony, po której stoi Mac).</summary>
-    private ScreenEdge EntryEdge() => Side switch
+    private ScreenEdge EntryEdge() => EntryEdgeFor(Side);
+
+    /// <summary>Krawędź Maca zwrócona w stronę Windowsa – tam Mac stawia też ekran wirtualny.</summary>
+    public static ScreenEdge EntryEdgeFor(MacSide side) => side switch
     {
         MacSide.Left => ScreenEdge.Right,
         MacSide.Right => ScreenEdge.Left,
@@ -280,8 +283,12 @@ public sealed class InputCapture : IDisposable
         _native?.HideHider();
     }
 
-    /// <summary>Wraca do sterowania lokalnego. ratio = pozycja wzdłuż krawędzi (z LEAVE Maca).</summary>
-    public void ReturnToLocal(float ratio, bool sendRelease)
+    /// <summary>
+    /// Wraca do sterowania lokalnego. ratio = pozycja wzdłuż krawędzi (z LEAVE Maca).
+    /// <paramref name="farEdgeOf"/>: kursor wyszedł z ekranu wirtualnego pokazanego na tym
+    /// monitorze – pojawia się przy jego drugiej krawędzi, tam gdzie był na obrazie.
+    /// </summary>
+    public void ReturnToLocal(float ratio, bool sendRelease, RECT? farEdgeOf = null)
     {
         if (!IsRemote) return;
         IsRemote = false;
@@ -302,7 +309,14 @@ public sealed class InputCapture : IDisposable
         var vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
         var vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
         var vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-        var (x, y) = Side switch
+        var (x, y) = farEdgeOf is { Width: > 0, Height: > 0 } far ? Side switch
+        {
+            MacSide.Left => (far.Right - 1 - inset, far.Top + (int)(ratio * (far.Height - 1))),
+            MacSide.Right => (far.Left + inset, far.Top + (int)(ratio * (far.Height - 1))),
+            MacSide.Top => (far.Left + (int)(ratio * (far.Width - 1)), far.Bottom - 1 - inset),
+            MacSide.Bottom => (far.Left + (int)(ratio * (far.Width - 1)), far.Top + inset),
+            _ => (_parked.X, _parked.Y),
+        } : Side switch
         {
             MacSide.Left => (vx + inset, m.Top + (int)(ratio * (m.Height - 1))),
             MacSide.Right => (vx + vw - 1 - inset, m.Top + (int)(ratio * (m.Height - 1))),

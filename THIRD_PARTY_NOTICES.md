@@ -9,7 +9,9 @@ Package versions are pinned in `windows/BorderlessMouse/packages.lock.json`.
 | FluentAvaloniaUI | FluentAvalonia contributors | MIT |
 | CommunityToolkit.Mvvm | .NET Foundation and contributors | MIT |
 | NAudio.Wasapi and NAudio.Core | Mark Heath and contributors | MIT |
-| Microsoft.Win32.Registry, Microsoft.NETCore.Platforms, System.IO.Pipelines and System.Security.Cryptography.ProtectedData | Microsoft Corporation, .NET Foundation and contributors | MIT |
+| Microsoft.Win32.Registry, Microsoft.NETCore.Platforms, System.IO.Pipelines, System.Security.Cryptography.ProtectedData, System.Text.Json and System.Text.Encodings.Web | Microsoft Corporation, .NET Foundation and contributors | MIT |
+| Vortice.Direct3D11, Vortice.DXGI, Vortice.MediaFoundation, Vortice.DirectX and Vortice.Mathematics | Copyright (c) Amer Koleci and Contributors | MIT |
+| SharpGen.Runtime and SharpGen.Runtime.COM | Copyright (c) 2010–2017 SharpDX – Alexandre Mutel; Copyright (c) 2017–2021 SharpGenTools contributors | MIT |
 | MicroCom.Runtime | Copyright 2021 Nikita Tsukanov | MIT |
 | SkiaSharp and native asset packages | Copyright 2015–2016 Xamarin, Inc.; Copyright 2017–2018 Microsoft Corporation | MIT |
 | HarfBuzzSharp and native asset packages | Copyright 2015–2016 Xamarin, Inc.; Copyright 2017–2018 Microsoft Corporation | MIT |

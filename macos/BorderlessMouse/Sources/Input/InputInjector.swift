@@ -11,14 +11,32 @@ final class InputInjector {
     var scrollPixelsPerNotch: Double = 40
 
     /// Kursor uderzył w krawędź powrotną – należy oddać sterowanie Windowsowi.
-    var onLeave: ((ScreenEdge, Float) -> Void)?
+    /// Trzeci argument: kursor wychodzi z ekranu wirtualnego (Windows stawia go po drugiej stronie monitora).
+    var onLeave: ((ScreenEdge, Float, Bool) -> Void)?
     var onActiveChanged: ((Bool) -> Void)?
+    /// Kursor sterowany z Windowsa wszedł na ekran wirtualny (true) lub z niego zszedł.
+    var onVirtualDisplayFocus: ((Bool) -> Void)?
+
+    /// Ekran wirtualny wyświetlany na Windowsie. Kursor z Windowsa nigdy nie
+    /// wchodzi na niego bezpośrednio – trafia na fizyczny ekran Maca.
+    var virtualDisplayID: CGDirectDisplayID? {
+        didSet {
+            guard virtualDisplayID != oldValue else { return }
+            refreshDisplays()
+        }
+    }
 
     private(set) var isActive = false
+    private(set) var isOnVirtualDisplay = false
     private var position = CGPoint.zero
     private var returnEdge: ScreenEdge = .right
-    private var currentDisplay = CGRect.zero
-    private var displays: [CGRect] = []
+    private var currentDisplay = Display(id: 0, bounds: .zero)
+    private var displays: [Display] = []
+
+    private struct Display {
+        let id: CGDirectDisplayID
+        let bounds: CGRect
+    }
 
     private var pressedKeys = Set<CGKeyCode>()
     private var buttonsDown = Set<Int>()
@@ -41,25 +59,52 @@ final class InputInjector {
 
     // MARK: - Ekrany
 
-    private static func activeDisplayBounds() -> [CGRect] {
+    private static func activeDisplays() -> [Display] {
         var count: UInt32 = 0
         CGGetActiveDisplayList(0, nil, &count)
-        guard count > 0 else { return [CGRect(x: 0, y: 0, width: 1920, height: 1080)] }
+        guard count > 0 else { return [Display(id: CGMainDisplayID(), bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080))] }
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
         CGGetActiveDisplayList(count, &ids, &count)
-        return ids.prefix(Int(count)).map { CGDisplayBounds($0) }
+        return ids.prefix(Int(count)).map { Display(id: $0, bounds: CGDisplayBounds($0)) }
+    }
+
+    /// Po dodaniu lub usunięciu ekranu wirtualnego (także w trakcie sterowania).
+    func refreshDisplays() {
+        guard isActive else { return }
+        displays = Self.activeDisplays()
+        if let fresh = displays.first(where: { $0.id == currentDisplay.id }) {
+            currentDisplay = fresh
+            if !fresh.bounds.contains(position) {
+                position.x = min(max(position.x, fresh.bounds.minX), fresh.bounds.maxX - 1)
+                position.y = min(max(position.y, fresh.bounds.minY), fresh.bounds.maxY - 1)
+            }
+        } else if let fallback = displays.first(where: { $0.id != virtualDisplayID }) {
+            // Ekran wirtualny zniknął pod kursorem – wracamy na fizyczny ekran.
+            currentDisplay = fallback
+            position = CGPoint(x: fallback.bounds.midX, y: fallback.bounds.midY)
+            postMouse(.mouseMoved, dx: 0, dy: 0)
+        }
+        setVirtualFocus(currentDisplay.id == virtualDisplayID && virtualDisplayID != nil)
+    }
+
+    private func setVirtualFocus(_ focused: Bool) {
+        guard focused != isOnVirtualDisplay else { return }
+        isOnVirtualDisplay = focused
+        onVirtualDisplayFocus?(focused)
     }
 
     // MARK: - Wejście/wyjście kursora
 
     func enter(edge: ScreenEdge, ratio: Float) {
-        displays = Self.activeDisplayBounds()
+        displays = Self.activeDisplays()
+        let physical = displays.filter { $0.id != virtualDisplayID }.map(\.bounds)
+        let candidates = physical.isEmpty ? displays.map(\.bounds) : physical
         let target: CGRect
         switch edge {
-        case .left: target = displays.min { $0.minX < $1.minX }!
-        case .right: target = displays.max { $0.maxX < $1.maxX }!
-        case .top: target = displays.min { $0.minY < $1.minY }!
-        case .bottom: target = displays.max { $0.maxY < $1.maxY }!
+        case .left: target = candidates.min { $0.minX < $1.minX }!
+        case .right: target = candidates.max { $0.maxX < $1.maxX }!
+        case .top: target = candidates.min { $0.minY < $1.minY }!
+        case .bottom: target = candidates.max { $0.maxY < $1.maxY }!
         }
         let r = CGFloat(min(max(ratio, 0), 1))
         switch edge {
@@ -68,8 +113,10 @@ final class InputInjector {
         case .top: position = CGPoint(x: target.minX + r * (target.width - 1), y: target.minY + 2)
         case .bottom: position = CGPoint(x: target.minX + r * (target.width - 1), y: target.maxY - 3)
         }
-        currentDisplay = target
+        currentDisplay = displays.first { $0.bounds == target } ?? Display(id: 0, bounds: target)
         returnEdge = edge
+        // Po ręcznym przełączeniu (Scroll Lock) kursor mógł zostać na ekranie wirtualnym.
+        setVirtualFocus(false)
         if !isActive {
             isActive = true
             onActiveChanged?(true)
@@ -80,6 +127,7 @@ final class InputInjector {
     /// Kończy sterowanie (np. rozłączenie) – zwalnia wszystko.
     func deactivate() {
         releaseAll()
+        setVirtualFocus(false)
         if isActive {
             isActive = false
             onActiveChanged?(false)
@@ -91,11 +139,12 @@ final class InputInjector {
     func moveBy(dx: Int, dy: Int) {
         guard isActive else { return }
         let candidate = CGPoint(x: position.x + CGFloat(dx), y: position.y + CGFloat(dy))
-        if let d = displays.first(where: { $0.contains(candidate) }) {
+        if let d = displays.first(where: { $0.bounds.contains(candidate) }) {
             currentDisplay = d
             position = candidate
+            setVirtualFocus(d.id == virtualDisplayID && virtualDisplayID != nil)
         } else {
-            let b = currentDisplay
+            let b = currentDisplay.bounds
             var leaving = false
             var ratio: Float = 0
             switch returnEdge {
@@ -112,8 +161,9 @@ final class InputInjector {
             }
             if leaving {
                 let edge = returnEdge
+                let fromVirtual = isOnVirtualDisplay
                 deactivate()
-                onLeave?(edge, min(max(ratio, 0), 1))
+                onLeave?(edge, min(max(ratio, 0), 1), fromVirtual)
                 return
             }
             position.x = min(max(candidate.x, b.minX), b.maxX - 1)

@@ -371,6 +371,22 @@ struct PermissionsPage: View {
                     .disabled({ if case .checking = state.audioPermission { return true }; return false }())
                 }
             }
+            Section("Ekran wirtualny") {
+                SettingRow(title: "Nagrywanie ekranu",
+                           subtitle: state.screenCaptureGranted
+                           ? L10n.text("Nadane – Mac może pokazać ekran wirtualny na Windowsie.", "Granted — the Mac can show its virtual display on Windows.")
+                           : L10n.text("Potrzebne tylko dla ekranu wirtualnego. Po nadaniu zgody uruchom aplikację ponownie.", "Needed only for the virtual display. Relaunch the app after granting it.")) {
+                    HStack(spacing: 8) {
+                        StatusDot(ok: state.screenCaptureGranted ? true : nil)
+                        if state.screenCaptureGranted {
+                            Text("OK").foregroundStyle(.secondary)
+                        } else {
+                            Button("Poproś") { state.requestScreenCapture() }
+                            Button("Ustawienia") { state.openScreenCaptureSettings() }
+                        }
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .onAppear { state.checkAudioPermission(force: false) }
@@ -451,6 +467,20 @@ struct ControlPage: View {
                     }
                 }
                 .padding(.vertical, 2)
+            }
+            Section("Ekran wirtualny dla Windowsa") {
+                SettingRow(title: "Udostępniaj ekran wirtualny",
+                           subtitle: "Monitor Windowsa staje się drugim ekranem Maca. Przeciągnij okno w stronę Windowsa, a pojawi się na jego ekranie.") {
+                    Toggle("", isOn: $state.settings.displayEnabled).labelsHidden().toggleStyle(.switch)
+                }
+                SettingRow(title: "Stan", subtitle: state.displayStatusText) {
+                    HStack(spacing: 8) {
+                        StatusDot(ok: state.displayStreaming ? true : (state.displayError == nil ? nil : false))
+                        if state.displayStreaming {
+                            Button("Zatrzymaj") { state.stopDisplay() }
+                        }
+                    }
+                }
             }
             Section("Schowek") {
                 SettingRow(title: "Synchronizuj schowek (tekst i zdjęcia)",
