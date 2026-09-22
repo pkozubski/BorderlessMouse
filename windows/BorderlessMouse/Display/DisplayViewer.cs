@@ -456,7 +456,8 @@ public sealed class DisplayViewer : IDisposable
         switch (msg)
         {
             case WM_SETCURSOR:
-                SetCursor(IntPtr.Zero); // kursor Maca jest już w obrazie
+                // Pełny pulpit: kursor Maca jest w obrazie. Tryb okien: widać zwykły kursor Windows.
+                SetCursor(_region is null ? IntPtr.Zero : LoadCursorW(IntPtr.Zero, IDC_ARROW));
                 return 1;
             case WM_MOUSEACTIVATE:
                 return MA_NOACTIVATE;

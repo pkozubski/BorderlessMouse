@@ -409,6 +409,7 @@ final class Engine {
                     self.displayID = ready.displayID
                     self.injector.virtualDisplayID = ready.displayID
                     self.applyDisplayMode(self.displayMode)
+                    self.evacuateRestoredWindows(displayID: ready.displayID, generation: generation)
                     self.server.send(Frame.displayReady(status: 0, port: ready.port, key: ready.key, token: ready.token,
                                                         pixelWidth: ready.width, pixelHeight: ready.height, message: ""))
                     let desc = "\(ready.width)×\(ready.height) · H.264 \(ready.bitrate / 1_000_000) Mb/s"
@@ -423,6 +424,24 @@ final class Engine {
                     self.emit(.log(L10n.text("Ekran wirtualny: \(message)", "Virtual display: \(message)")))
                 }
                 self.sendStatus()
+            }
+        }
+    }
+
+    /// macOS przywraca na ekran wirtualny okna z poprzedniej sesji chwilę po jego
+    /// pojawieniu się – każda sesja ma startować pusta, więc odsyłamy je na Maca.
+    private func evacuateRestoredWindows(displayID: CGDirectDisplayID, generation: UInt64) {
+        for delay in [0.3, 1.2, 3.0] {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                let current = self.eventsQueue.sync { self.displayGeneration == generation && self.displayID == displayID }
+                guard current else { return }
+                let moved = WindowEvacuator.evacuate(from: displayID)
+                guard moved > 0 else { return }
+                self.eventsQueue.async {
+                    self.emit(.log(L10n.text("Przeniesiono na ekran Maca okna przywrócone przez macOS: \(moved)",
+                                             "Moved windows restored by macOS back to the Mac screen: \(moved)")))
+                }
             }
         }
     }

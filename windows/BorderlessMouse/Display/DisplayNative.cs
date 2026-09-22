@@ -52,6 +52,10 @@ internal static class DisplayNative
     public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc callback, IntPtr data);
 
     public const int RGN_OR = 2;
+    public const int IDC_ARROW = 32512;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr LoadCursorW(IntPtr hInstance, IntPtr cursorName);
 
     [DllImport("gdi32.dll")]
     public static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
