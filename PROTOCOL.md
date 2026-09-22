@@ -55,10 +55,14 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x10 | MOUSE_MOVE | W → M | `i16 dx`, `i16 dy` |
 | 0x11 | MOUSE_BUTTON | W → M | `u8 button`, `u8 down` |
 | 0x12 | MOUSE_WHEEL | W → M | `i16 dx`, `i16 dy` |
+| 0x13 | MOUSE_ABSOLUTE | W → M | `u16 x`, `u16 y` (0…65535 na ekranie wirtualnym, tryb okien) |
 | 0x20 | KEY | W → M | `u16 scancode`, `u16 vk`, `u8 flags` |
 | 0x21 | RELEASE_ALL | W → M | – |
 | 0x30 | ENTER | W → M | `u8 edge`, `f32 ratio` |
 | 0x31 | LEAVE | M → W | `u8 edge`, `f32 ratio`, opcjonalnie `u8 flags` (bit 0: kursor wyszedł z ekranu wirtualnego) |
+| 0x32 | WINDOW_ENTER | W → M | `u16 x`, `u16 y` – kursor Windows nad oknem Maca |
+| 0x33 | WINDOW_LEAVE | W → M | `u8 keepKeyboard` – kursor zszedł z okna (1 = klawiatura nadal w oknie Maca) |
+| 0x34 | WINDOW_HANDOFF | M → W | `u16 x`, `u16 y` – okno upuszczone na ekranie wirtualnym, Windows przejmuje kursor |
 | 0x40 | AUDIO_START | W → M | `u16 udpPort`, `u8 format` |
 | 0x41 | AUDIO_STOP | W → M | – |
 | 0x42 | AUDIO_FORMAT | M → W | `u32 rate`, `u8 channels`, `u8 format`, `u8 status`, komunikat |
@@ -66,15 +70,17 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x51 | PONG | obie | echo PING |
 | 0x60 | STATUS | M → W | flagi stanu |
 | 0x70 | CLIPBOARD | obie | `u8 format`, dane |
-| 0x80 | DISPLAY_START | W → M | `u16 width`, `u16 height`, `u16 scalePercent`, `u8 edge`, `u8 codec=0`, `u32 maxBitrateKbps` (0 = auto) |
+| 0x80 | DISPLAY_START | W → M | `u16 width`, `u16 height`, `u16 scalePercent`, `u8 edge`, `u8 codec=0`, `u32 maxBitrateKbps` (0 = auto), opcjonalnie `u8 mode` (0 = cały pulpit, 1 = okna) |
 | 0x81 | DISPLAY_STOP | W → M | – |
 | 0x82 | DISPLAY_READY | M → W | `u8 status`, `u16 port`, `32 B key`, `16 B token`, `u16 width`, `u16 height`, komunikat |
 | 0x83 | DISPLAY_KEYFRAME | W → M | – |
 | 0x84 | DISPLAY_FOCUS | M → W | `u8 active` |
+| 0x85 | DISPLAY_MODE | W → M | `u8 mode` |
+| 0x86 | DISPLAY_WINDOWS | M → W | `u8 count`, `count ×` (`u16 x`, `u16 y`, `u16 w`, `u16 h`, `u8 flags`; bit 0 = pasek menu), od najwyższego |
 
 Flagi `STATUS`: bit 0 Dostępność, bit 1 przechwytywanie audio, bit 2 kursor na Macu,
 bit 3 Mac obsługuje ekran wirtualny, bit 4 ekran wirtualny włączony na Macu,
-bit 5 strumień ekranu działa. Windows wysyła `DISPLAY_*` dopiero, gdy widzi bit 3 –
+bit 5 strumień ekranu działa, bit 6 Mac obsługuje tryb okien. Windows wysyła `DISPLAY_*` dopiero, gdy widzi bit 3 –
 starsza wersja Maca nie zna tych typów i zerwałaby sesję.
 
 Schowek przyjmuje tekst do 1 MiB i PNG do 32 MiB / 64 megapikseli. Nieznane,
@@ -149,6 +155,22 @@ ekran Maca; na ekran wirtualny przechodzi dopiero z niego i tylko podczas przeci
 (`LEAVE` bez bitu 0), jak bez ekranu wirtualnego. Wyjście przez dalszą krawędź
 ekranu wirtualnego oddaje sterowanie Windowsowi (`LEAVE` z bitem 0), a kursor Windows
 pojawia się przy tej samej krawędzi monitora.
+
+### Tryb okien
+
+W trybie okien (`mode = 1`) Windows pokazuje obraz ekranu wirtualnego tylko w prostokątach
+z `DISPLAY_WINDOWS` (Mac wysyła je po każdej zmianie, do ~15 razy na sekundę); reszta
+monitora to zwykły pulpit Windows. Mac nie rysuje wtedy kursora w obrazie.
+
+* Kursor Windows nad oknem Maca zostaje lokalny i widoczny. Windows wysyła `WINDOW_ENTER`,
+  potem `MOUSE_ABSOLUTE` przy każdym ruchu oraz zwykłe `MOUSE_BUTTON` / `MOUSE_WHEEL`.
+  Z wciśniętym przyciskiem kursor należy do Maca także poza oknem (przeciąganie).
+* `WINDOW_LEAVE` kończy sterowanie myszą. Klawiatura (`KEY`) trafia do Maca od kliknięcia
+  w okno Maca do kliknięcia w aplikację Windows.
+* Przeciągnięcie okna z MacBooka na ekran wirtualny i puszczenie przycisku kończy się
+  `WINDOW_HANDOFF`: Windows kontynuuje od tego punktu w trybie okien.
+* Przeciągnięcie okna Maca przez krawędź Windows po stronie Maca wysyła zwykłe `ENTER`;
+  Mac zachowuje wciśnięty przycisk, więc okno przechodzi na ekran MacBooka.
 
 ## Granice zaufania
 

@@ -31,10 +31,14 @@ enum MessageType: UInt8 {
     case mouseMove = 0x10
     case mouseButton = 0x11
     case mouseWheel = 0x12
+    case mouseAbsolute = 0x13
     case key = 0x20
     case releaseAll = 0x21
     case enter = 0x30
     case leave = 0x31
+    case windowEnter = 0x32
+    case windowLeave = 0x33
+    case windowHandoff = 0x34
     case audioStart = 0x40
     case audioStop = 0x41
     case audioFormat = 0x42
@@ -47,6 +51,24 @@ enum MessageType: UInt8 {
     case displayReady = 0x82
     case displayKeyframe = 0x83
     case displayFocus = 0x84
+    case displayMode = 0x85
+    case displayWindows = 0x86
+}
+
+/// Tryb ekranu wirtualnego po stronie Windows.
+enum DisplayMode: UInt8 {
+    /// Cały pulpit ekranu wirtualnego na pełnym monitorze Windows.
+    case fullscreen = 0
+    /// Tylko okna Maca, wtopione w pulpit Windows.
+    case windows = 1
+}
+
+/// Punkt lub prostokąt na ekranie wirtualnym w jednostkach 0…65535 (niezależnie od rozdzielczości).
+struct NormalizedRect: Equatable {
+    let x: UInt16, y: UInt16, width: UInt16, height: UInt16
+    let flags: UInt8
+
+    static let menuBar: UInt8 = 1 << 0
 }
 
 enum ClipboardFormat: UInt8 {
@@ -91,6 +113,8 @@ struct StatusFlags: OptionSet {
     /// Użytkownik Maca zezwala na ekran wirtualny dla Windowsa.
     static let displayEnabled = StatusFlags(rawValue: 1 << 4)
     static let displayStreaming = StatusFlags(rawValue: 1 << 5)
+    /// Mac obsługuje tryb okien (DISPLAY_MODE, DISPLAY_WINDOWS, WINDOW_*).
+    static let windowModeSupported = StatusFlags(rawValue: 1 << 6)
 }
 
 /// Prośba Windowsa o wirtualny monitor Maca wyświetlany na ekranie Windows.
@@ -105,16 +129,20 @@ struct DisplayStartRequest: Equatable {
     let codec: UInt8
     /// 0 = automatycznie.
     let maxBitrateKbps: UInt32
+    /// Opcjonalny 13. bajt; starsze wersje Windows go nie wysyłają (= pełny ekran).
+    let mode: DisplayMode
 
     static let payloadBytes = 12
 
-    init(pixelWidth: Int, pixelHeight: Int, scalePercent: Int, edge: ScreenEdge, codec: UInt8 = 0, maxBitrateKbps: UInt32 = 0) {
+    init(pixelWidth: Int, pixelHeight: Int, scalePercent: Int, edge: ScreenEdge, codec: UInt8 = 0,
+         maxBitrateKbps: UInt32 = 0, mode: DisplayMode = .fullscreen) {
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.scalePercent = scalePercent
         self.edge = edge
         self.codec = codec
         self.maxBitrateKbps = maxBitrateKbps
+        self.mode = mode
     }
 
     init?(payload: [UInt8]) {
@@ -125,8 +153,9 @@ struct DisplayStartRequest: Equatable {
               let codec = r.u8(), let bitrate = r.u32(),
               (320...8192).contains(Int(w)), (240...8192).contains(Int(h)),
               (50...400).contains(Int(scale)), codec == 0 else { return nil }
+        let mode = r.u8().flatMap(DisplayMode.init(rawValue:)) ?? .fullscreen
         self.init(pixelWidth: Int(w), pixelHeight: Int(h), scalePercent: Int(scale),
-                  edge: edge, codec: codec, maxBitrateKbps: bitrate)
+                  edge: edge, codec: codec, maxBitrateKbps: bitrate, mode: mode)
     }
 
     var payload: [UInt8] {
@@ -137,6 +166,7 @@ struct DisplayStartRequest: Equatable {
         w.u8(edge.rawValue)
         w.u8(codec)
         w.u32(maxBitrateKbps)
+        w.u8(mode.rawValue)
         return w.bytes
     }
 }
@@ -322,6 +352,24 @@ enum Frame {
     }
 
     static func displayFocus(_ active: Bool) -> Data { make(.displayFocus, [active ? 1 : 0]) }
+
+    /// Okna Maca na ekranie wirtualnym, od najwyższego. Najwyżej 255 prostokątów.
+    static func displayWindows(_ rects: [NormalizedRect]) -> Data {
+        var w = ByteWriter()
+        let limited = rects.prefix(255)
+        w.u8(UInt8(limited.count))
+        for rect in limited {
+            w.u16(rect.x); w.u16(rect.y); w.u16(rect.width); w.u16(rect.height); w.u8(rect.flags)
+        }
+        return make(.displayWindows, w.bytes)
+    }
+
+    /// Upuszczono okno na ekranie wirtualnym: Windows przejmuje kursor w tym punkcie.
+    static func windowHandoff(x: UInt16, y: UInt16) -> Data {
+        var w = ByteWriter()
+        w.u16(x); w.u16(y)
+        return make(.windowHandoff, w.bytes)
+    }
 
     static func ping(_ ts: UInt64) -> Data {
         var w = ByteWriter()

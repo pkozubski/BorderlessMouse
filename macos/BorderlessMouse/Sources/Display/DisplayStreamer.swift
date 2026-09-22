@@ -43,6 +43,7 @@ final class DisplayStreamer {
     /// Rośnie przy każdym starcie i zatrzymaniu – spóźniony start nie nadpisze nowszego stanu.
     private var generation: UInt64 = 0
     private var lastStats: (frames: UInt64, bytes: UInt64) = (0, 0)
+    private var showsCursor = true
 
     // chronione frameLock (kolejka przechwytywania i wątek VideoToolbox)
     private var awaitingKeyframe = true
@@ -59,6 +60,7 @@ final class DisplayStreamer {
     func start(_ request: DisplayStartRequest, name: String, completion: @escaping (Result<Ready, Error>) -> Void) {
         queue.async {
             self.stopLocked()
+            self.showsCursor = request.mode == .fullscreen
             let generation = self.generation
             Task { await self.startAsync(request, name: name, generation: generation, completion: completion) }
         }
@@ -66,6 +68,21 @@ final class DisplayStreamer {
 
     func stop() {
         queue.sync { stopLocked() }
+    }
+
+    /// Tryb okien ukrywa kursor Maca w obrazie (Windows pokazuje własny).
+    func setShowsCursor(_ shows: Bool) {
+        queue.async {
+            guard self.showsCursor != shows else { return }
+            self.showsCursor = shows
+            guard let capture = self.capture, let encoder = self.encoder else { return }
+            let (width, height) = (encoder.width, encoder.height)
+            let queue = self.queue
+            Task { [weak self] in
+                try? await capture.update(width: width, height: height, showsCursor: shows)
+                queue.async { self?.forceKeyframe() }
+            }
+        }
     }
 
     /// Windows prosi o klatkę kluczową (np. po błędzie dekodera).
@@ -115,7 +132,8 @@ final class DisplayStreamer {
                 self.bitrate = encoder.bitrate
                 self.wire(capture: capture, encoder: encoder, server: server)
             }
-            try await capture.start(displayID: display.displayID, width: width, height: height)
+            let showsCursor = onQueue { self.showsCursor }
+            try await capture.start(displayID: display.displayID, width: width, height: height, showsCursor: showsCursor)
             try onQueue {
                 guard generation == self.generation else {
                     capture.stop()

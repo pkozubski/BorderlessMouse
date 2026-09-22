@@ -65,6 +65,9 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Kursor sterowany z Windowsa jest na ekranie wirtualnym Maca.</summary>
     private bool _displayFocus;
     private NativeMethods.RECT _displayMonitor;
+    /// <summary>Tryb okien działa (Windows go chce, a Mac obsługuje).</summary>
+    private bool _windowModeActive;
+    private List<NormalizedRect> _macWindows = new();
     private readonly Stopwatch _displayStatsClock = new();
     private long _displayStatsBytes;
     private long _displayStatsFrames;
@@ -105,6 +108,7 @@ public partial class MainViewModel : ObservableObject
         _clipboardSyncEnabled = _settings.ClipboardSyncEnabled;
         _displayEnabled = _settings.DisplayEnabled;
         _showMacDisplayWhileRemote = _settings.ShowMacDisplayWhileRemote;
+        _displayWindowMode = _settings.DisplayWindowMode;
         _autoCheckUpdates = _settings.AutoCheckUpdates;
         _startMinimized = _settings.StartMinimized;
         _hasCompletedOnboarding = _settings.HasCompletedOnboarding;
@@ -160,6 +164,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _clipboardSyncEnabled;
     [ObservableProperty] private bool _displayEnabled;
     [ObservableProperty] private bool _showMacDisplayWhileRemote;
+    [ObservableProperty] private bool _displayWindowMode;
     [ObservableProperty] private bool _autoCheckUpdates;
     [ObservableProperty] private bool _launchAtLogin;
     [ObservableProperty] private bool _startMinimized;
@@ -569,6 +574,13 @@ public partial class MainViewModel : ObservableObject
             case MessageType.DisplayReady:
                 if (Frame.ParseDisplayReady(payload) is { } ready) OnDisplayReady(ready);
                 break;
+            case MessageType.DisplayWindows:
+                if (_displayRunning && _windowModeActive && Frame.ParseDisplayWindows(payload) is { } windows) ApplyMacWindows(windows);
+                break;
+            case MessageType.WindowHandoff:
+                if (_displayRunning && _windowModeActive && Frame.ParseWindowHandoff(payload) is { } handoff)
+                    _capture?.HandoffToWindow(ToScreen(handoff.x, handoff.y));
+                break;
             case MessageType.DisplayFocus:
                 if (Frame.ParseDisplayFocus(payload) is { } focus)
                 {
@@ -687,6 +699,7 @@ public partial class MainViewModel : ObservableObject
                 UpdateStatus();
                 UpdateViewerVisibility();
             };
+            _capture.MacWindowFocusChanged += _ => { if (_windowModeActive) ApplyMacWindows(_macWindows); };
         }
         _capture.Enabled = InputSharingEnabled;
         _capture.Side = SelectedMacSide.Value;
@@ -879,7 +892,7 @@ public partial class MainViewModel : ObservableObject
             var monitor = DisplayNative.PickForSide(SelectedMacSide.Value);
             _displayMonitor = monitor.Bounds;
             _client.Send(Frame.DisplayStart(monitor.Bounds.Width, monitor.Bounds.Height, monitor.ScalePercent,
-                InputCapture.EntryEdgeFor(SelectedMacSide.Value)));
+                InputCapture.EntryEdgeFor(SelectedMacSide.Value), mode: WantedDisplayMode));
             _displayRequested = true;
             SetDisplayStatus(T($"Uruchamianie ekranu Maca {monitor.Bounds.Width}×{monitor.Bounds.Height}…", $"Starting the {monitor.Bounds.Width}×{monitor.Bounds.Height} Mac display…"), Orange);
             Log(T($"Ekran wirtualny: prośba o {monitor.Bounds.Width}×{monitor.Bounds.Height} ({monitor.ScalePercent}%)", $"Virtual display: requested {monitor.Bounds.Width}×{monitor.Bounds.Height} ({monitor.ScalePercent}%)"));
@@ -905,6 +918,7 @@ public partial class MainViewModel : ObservableObject
             if (!OperatingSystem.IsWindows()) return;
             _viewer ??= CreateViewer();
             _viewer.Start(_displayMonitor);
+            ApplyDisplayModeLocally();
             _videoRx.Start(IPAddress.Parse(_client.RemoteAddress), info.Port, info.Key, info.Token);
             _displayRunning = true;
             _displayStatsClock.Restart();
@@ -953,6 +967,9 @@ public partial class MainViewModel : ObservableObject
     {
         _displayRunning = false;
         _displayFocus = false;
+        _windowModeActive = false;
+        _macWindows = new();
+        _capture?.SetWindowMode(false, default);
         _videoRx.Stop();
         _viewer?.Stop();
         DisplayStatsText = "";
@@ -965,10 +982,66 @@ public partial class MainViewModel : ObservableObject
         EvaluateDisplay();
     }
 
-    /// <summary>Ekran Maca przykrywa monitor tylko podczas sterowania Makiem.</summary>
+    private DisplayMode WantedDisplayMode =>
+        DisplayWindowMode && _macFlags.HasFlag(StatusFlags.WindowModeSupported) ? DisplayMode.Windows : DisplayMode.Fullscreen;
+
+    /// <summary>Tryb okien: obraz tylko tam, gdzie są okna Maca; tryb pełny: cały monitor.</summary>
+    private void ApplyDisplayModeLocally()
+    {
+        _windowModeActive = WantedDisplayMode == DisplayMode.Windows;
+        _viewer?.SetRegion(_windowModeActive ? Array.Empty<NativeMethods.RECT>() : null);
+        _capture?.SetWindowMode(_windowModeActive, _displayMonitor);
+        UpdateViewerVisibility();
+    }
+
+    private void ApplyMacWindows(List<NormalizedRect> windows)
+    {
+        _macWindows = windows;
+        // Pasek menu Maca zasłoniłby górę pulpitu Windows – tylko gdy okno Maca ma klawiaturę.
+        var menuBar = _capture?.MacWindowFocused == true;
+        var screen = windows.Where(w => menuBar || (w.Flags & NormalizedRect.MenuBar) == 0).Select(w =>
+        {
+            var topLeft = ToScreen(w.X, w.Y);
+            var bottomRight = ToScreen((ushort)Math.Min(65535, w.X + w.Width), (ushort)Math.Min(65535, w.Y + w.Height));
+            return new NativeMethods.RECT { Left = topLeft.X, Top = topLeft.Y, Right = bottomRight.X, Bottom = bottomRight.Y };
+        }).ToArray();
+        _capture?.SetMacWindows(screen);
+        var m = _displayMonitor;
+        _viewer?.SetRegion(screen.Select(r => new NativeMethods.RECT
+        {
+            Left = r.Left - m.Left, Top = r.Top - m.Top, Right = r.Right - m.Left, Bottom = r.Bottom - m.Top,
+        }).ToArray());
+    }
+
+    /// <summary>0…65535 na ekranie wirtualnym → piksele ekranu Windows (obraz wypełnia monitor).</summary>
+    private NativeMethods.POINT ToScreen(ushort x, ushort y)
+    {
+        var m = _displayMonitor;
+        return new NativeMethods.POINT
+        {
+            X = m.Left + (int)((long)x * Math.Max(m.Width - 1, 1) / 65535),
+            Y = m.Top + (int)((long)y * Math.Max(m.Height - 1, 1) / 65535),
+        };
+    }
+
+    partial void OnDisplayWindowModeChanged(bool value)
+    {
+        _settings.DisplayWindowMode = value;
+        SaveSettings();
+        if (_loading || !_displayRunning) return;
+        _client.Send(Frame.SetDisplayMode(WantedDisplayMode));
+        ApplyDisplayModeLocally();
+    }
+
+    /// <summary>Ekran Maca przykrywa monitor tylko podczas sterowania Makiem (tryb pełny) albo pokazuje okna Maca (tryb okien).</summary>
     private void UpdateViewerVisibility()
     {
         if (_viewer is null) return;
+        if (_windowModeActive)
+        {
+            _viewer.SetVisible(_displayRunning);
+            return;
+        }
         var remote = _capture?.IsRemote == true;
         _viewer.SetVisible(_displayRunning && remote && (_displayFocus || ShowMacDisplayWhileRemote));
     }

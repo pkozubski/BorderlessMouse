@@ -36,10 +36,14 @@ public enum MessageType : byte
     MouseMove = 0x10,
     MouseButton = 0x11,
     MouseWheel = 0x12,
+    MouseAbsolute = 0x13,
     Key = 0x20,
     ReleaseAll = 0x21,
     Enter = 0x30,
     Leave = 0x31,
+    WindowEnter = 0x32,
+    WindowLeave = 0x33,
+    WindowHandoff = 0x34,
     AudioStart = 0x40,
     AudioStop = 0x41,
     AudioFormat = 0x42,
@@ -52,6 +56,21 @@ public enum MessageType : byte
     DisplayReady = 0x82,
     DisplayKeyframe = 0x83,
     DisplayFocus = 0x84,
+    DisplayMode = 0x85,
+    DisplayWindows = 0x86,
+}
+
+/// <summary>Tryb ekranu wirtualnego: cały pulpit albo same okna Maca na pulpicie Windows.</summary>
+public enum DisplayMode : byte
+{
+    Fullscreen = 0,
+    Windows = 1,
+}
+
+/// <summary>Prostokąt na ekranie wirtualnym w jednostkach 0…65535.</summary>
+public readonly record struct NormalizedRect(ushort X, ushort Y, ushort Width, ushort Height, byte Flags)
+{
+    public const byte MenuBar = 0x01;
 }
 
 public enum ScreenEdge : byte
@@ -74,6 +93,8 @@ public enum StatusFlags : byte
     /// <summary>Użytkownik Maca zezwala na ekran wirtualny.</summary>
     DisplayEnabled = 1 << 4,
     DisplayStreaming = 1 << 5,
+    /// <summary>Mac obsługuje tryb okien.</summary>
+    WindowModeSupported = 1 << 6,
 }
 
 /// <summary>Odpowiedź Maca na DISPLAY_START (lub komunikat o zatrzymaniu, gdy Status != 0).</summary>
@@ -236,17 +257,35 @@ public static class Frame
     public static byte[] AudioStop() => Make(MessageType.AudioStop, ReadOnlySpan<byte>.Empty);
 
     /// <summary>Prośba o wirtualny monitor Maca o rozmiarze monitora Windows (piksele fizyczne).</summary>
-    public static byte[] DisplayStart(int width, int height, int scalePercent, ScreenEdge macEdgeFacingWindows, uint maxBitrateKbps = 0)
+    public static byte[] DisplayStart(int width, int height, int scalePercent, ScreenEdge macEdgeFacingWindows,
+        uint maxBitrateKbps = 0, Protocol.DisplayMode mode = Protocol.DisplayMode.Fullscreen)
     {
-        Span<byte> p = stackalloc byte[12];
+        Span<byte> p = stackalloc byte[13];
         BinaryPrimitives.WriteUInt16LittleEndian(p, (ushort)Math.Clamp(width, 320, 8192));
         BinaryPrimitives.WriteUInt16LittleEndian(p[2..], (ushort)Math.Clamp(height, 240, 8192));
         BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)Math.Clamp(scalePercent, 50, 400));
         p[6] = (byte)macEdgeFacingWindows;
         p[7] = 0; // H.264
         BinaryPrimitives.WriteUInt32LittleEndian(p[8..], maxBitrateKbps);
+        p[12] = (byte)mode;
         return Make(MessageType.DisplayStart, p);
     }
+
+    public static byte[] SetDisplayMode(Protocol.DisplayMode mode) => Make(MessageType.DisplayMode, [(byte)mode]);
+
+    private static byte[] Point(MessageType type, ushort x, ushort y)
+    {
+        Span<byte> p = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt16LittleEndian(p, x);
+        BinaryPrimitives.WriteUInt16LittleEndian(p[2..], y);
+        return Make(type, p);
+    }
+
+    /// <summary>Kursor Windows wszedł nad okno Maca (punkt 0…65535 na ekranie wirtualnym).</summary>
+    public static byte[] WindowEnter(ushort x, ushort y) => Point(MessageType.WindowEnter, x, y);
+    public static byte[] MouseAbsolute(ushort x, ushort y) => Point(MessageType.MouseAbsolute, x, y);
+    /// <summary>Kursor zszedł z okna Maca; <paramref name="keepKeyboard"/> – klawiatura dalej pisze w tym oknie.</summary>
+    public static byte[] WindowLeave(bool keepKeyboard) => Make(MessageType.WindowLeave, [keepKeyboard ? (byte)1 : (byte)0]);
 
     public static byte[] DisplayStop() => Make(MessageType.DisplayStop, ReadOnlySpan<byte>.Empty);
     public static byte[] DisplayKeyframe() => Make(MessageType.DisplayKeyframe, ReadOnlySpan<byte>.Empty);
@@ -287,6 +326,22 @@ public static class Frame
     }
 
     public static bool? ParseDisplayFocus(ReadOnlySpan<byte> p) => p.Length >= 1 ? p[0] != 0 : null;
+
+    public static List<NormalizedRect>? ParseDisplayWindows(ReadOnlySpan<byte> p)
+    {
+        if (p.Length < 1 || p.Length != 1 + p[0] * 9) return null;
+        var rects = new List<NormalizedRect>(p[0]);
+        for (var i = 0; i < p[0]; i++)
+        {
+            var r = p.Slice(1 + i * 9, 9);
+            rects.Add(new NormalizedRect(BinaryPrimitives.ReadUInt16LittleEndian(r), BinaryPrimitives.ReadUInt16LittleEndian(r[2..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(r[4..]), BinaryPrimitives.ReadUInt16LittleEndian(r[6..]), r[8]));
+        }
+        return rects;
+    }
+
+    public static (ushort x, ushort y)? ParseWindowHandoff(ReadOnlySpan<byte> p)
+        => p.Length >= 4 ? (BinaryPrimitives.ReadUInt16LittleEndian(p), BinaryPrimitives.ReadUInt16LittleEndian(p[2..])) : null;
 
     public static AudioFormatInfo? ParseAudioFormat(ReadOnlySpan<byte> p)
     {

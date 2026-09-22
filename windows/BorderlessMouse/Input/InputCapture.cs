@@ -27,6 +27,15 @@ public sealed class InputCapture : IDisposable
     private long _remoteMoves;
     private DateTime _suppressEdgeUntil = DateTime.MinValue;
 
+    // tryb okien (wątek UI – tak jak hooki)
+    private bool _windowMode;
+    private RECT _macMonitor;
+    private RECT[] _macWindows = Array.Empty<RECT>();
+    private bool _windowInput;
+    private int _windowButtons;
+    private bool _keyboardToMacValue;
+    private DateTime _windowGraceUntil = DateTime.MinValue;
+
     /// <summary>Liczba ruchów myszy wysłanych do Maca w bieżącej sesji zdalnej.</summary>
     public long RemoteMovesSent => Interlocked.Read(ref _remoteMoves);
     /// <summary>Czas ostatniego ENTER (UTC) – do wykrywania natychmiastowego odrzucenia przez Maca.</summary>
@@ -72,6 +81,7 @@ public sealed class InputCapture : IDisposable
 
     public void UninstallHooks()
     {
+        ResetWindowInput(notifyMac: false);
         if (IsRemote) ReturnToLocal(0.5f, sendRelease: true);
         if (!_hooks.IsInstalled) return;
         _hooks.Uninstall();
@@ -114,6 +124,7 @@ public sealed class InputCapture : IDisposable
     /// <summary>Przełącza ręcznie wybranym klawiszem awaryjnym.</summary>
     public void Toggle()
     {
+        ResetWindowInput(notifyMac: true);
         if (IsRemote) ReturnToLocal(0.5f, sendRelease: true);
         else if (_client.IsConnected && Enabled)
         {
@@ -130,6 +141,7 @@ public sealed class InputCapture : IDisposable
 
         if (!IsRemote)
         {
+            if (_windowMode && Enabled && _client.IsConnected && HandleWindowMouse(msg, d)) return true;
             if (msg == WM_MOUSEMOVE && Enabled && _client.IsConnected
                 && DateTime.UtcNow >= _suppressEdgeUntil
                 && TryDetectEdge(d.pt, out var ratio, out var monitor)
@@ -191,6 +203,177 @@ public sealed class InputCapture : IDisposable
         }
     }
 
+    // ---------------- tryb okien ----------------
+
+    /// <summary>
+    /// Tryb okien: okna Maca leżą na pulpicie Windows. Nad nimi kursor Windows zostaje
+    /// widoczny i lokalny (bez opóźnienia wideo), a Mac dostaje jego pozycję, kliknięcia
+    /// i przewijanie. Klawiatura idzie do ostatnio klikniętego okna – Maca albo Windows.
+    /// </summary>
+    public void SetWindowMode(bool enabled, RECT monitor)
+    {
+        if (!enabled) ResetWindowInput(notifyMac: true);
+        _windowMode = enabled;
+        _macMonitor = monitor;
+        if (!enabled) _macWindows = Array.Empty<RECT>();
+    }
+
+    /// <summary>Prostokąty okien Maca we współrzędnych ekranu (wątek UI, jak hooki).</summary>
+    public void SetMacWindows(RECT[] rects) => _macWindows = rects;
+
+    /// <summary>Okno Maca ma klawiaturę (zostało kliknięte). Wątek UI.</summary>
+    public event Action<bool>? MacWindowFocusChanged;
+    public bool MacWindowFocused => _keyboardToMacValue;
+
+    private bool _keyboardToMac
+    {
+        get => _keyboardToMacValue;
+        set
+        {
+            if (_keyboardToMacValue == value) return;
+            _keyboardToMacValue = value;
+            // Zmiana w hooku: interfejs (pasek menu Maca) aktualizujemy poza nim.
+            Dispatcher.UIThread.Post(() => MacWindowFocusChanged?.Invoke(value));
+        }
+    }
+
+    /// <summary>
+    /// Mac oddał kursor po upuszczeniu przeciąganego okna na ekranie wirtualnym:
+    /// kursor Windows pojawia się w tym miejscu i od razu steruje tym oknem.
+    /// </summary>
+    public void HandoffToWindow(POINT point)
+    {
+        if (IsRemote)
+        {
+            IsRemote = false;
+            _keysDown.Clear();
+            RestoreCursor();
+            RemoteChanged?.Invoke(false);
+        }
+        SetCursorPos(point.X, point.Y);
+        // Lista okien dociera kilkanaście razy na sekundę – do tego czasu ufamy Macowi.
+        _windowGraceUntil = DateTime.UtcNow.AddMilliseconds(400);
+        _keyboardToMac = true;
+        EnterWindowInput(point);
+    }
+
+    private bool HandleWindowMouse(int msg, in MSLLHOOKSTRUCT d)
+    {
+        var inside = HitMacWindow(d.pt) || DateTime.UtcNow < _windowGraceUntil;
+        if (msg == WM_MOUSEMOVE)
+        {
+            if (_windowInput)
+            {
+                // Przeciąganie trzyma kursor przy Macu także poza oknem (jak przechwycenie myszy).
+                if (!inside && _windowButtons == 0)
+                {
+                    LeaveWindowInput();
+                    return false;
+                }
+                var (x, y) = ToMac(d.pt);
+                _client.Send(Frame.MouseAbsolute(x, y));
+            }
+            else if (inside)
+            {
+                EnterWindowInput(d.pt);
+            }
+            return false; // kursor Windows porusza się normalnie
+        }
+
+        if (!_windowInput)
+        {
+            // Kliknięcie w aplikację Windows zabiera klawiaturę z okna Maca.
+            if (_keyboardToMac && IsButtonDown(msg))
+            {
+                _keyboardToMac = false;
+                _client.Send(Frame.WindowLeave(keepKeyboard: false));
+            }
+            return false;
+        }
+        if (!ForwardButtonOrWheel(msg, d)) return false;
+        if (IsButtonDown(msg))
+        {
+            _windowButtons++;
+            _keyboardToMac = true;
+        }
+        else if (msg is WM_LBUTTONUP or WM_RBUTTONUP or WM_MBUTTONUP or WM_XBUTTONUP)
+        {
+            _windowButtons = Math.Max(0, _windowButtons - 1);
+        }
+        return true;
+    }
+
+    private void EnterWindowInput(POINT pt)
+    {
+        _windowInput = true;
+        _windowButtons = 0;
+        var (x, y) = ToMac(pt);
+        _client.Send(Frame.WindowEnter(x, y));
+    }
+
+    private void LeaveWindowInput()
+    {
+        if (!_windowInput) return;
+        _windowInput = false;
+        _windowButtons = 0;
+        _client.Send(Frame.WindowLeave(_keyboardToMac));
+    }
+
+    private void ResetWindowInput(bool notifyMac)
+    {
+        if (notifyMac && (_windowInput || _keyboardToMac) && _client.IsConnected)
+            _client.Send(Frame.WindowLeave(keepKeyboard: false));
+        _windowInput = false;
+        _windowButtons = 0;
+        _keyboardToMac = false;
+    }
+
+    private bool HitMacWindow(POINT pt)
+    {
+        foreach (var r in _macWindows)
+        {
+            if (pt.X >= r.Left && pt.X < r.Right && pt.Y >= r.Top && pt.Y < r.Bottom) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Punkt ekranu → 0…65535 na ekranie wirtualnym (wyświetlanym na całym monitorze).</summary>
+    private (ushort x, ushort y) ToMac(POINT pt)
+    {
+        var m = _macMonitor;
+        static ushort Scale(int value, int origin, int size) =>
+            (ushort)Math.Clamp((long)(value - origin) * 65535 / Math.Max(size - 1, 1), 0, 65535);
+        return (Scale(pt.X, m.Left, m.Width), Scale(pt.Y, m.Top, m.Height));
+    }
+
+    private static bool IsButtonDown(int msg) => msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN or WM_XBUTTONDOWN;
+
+    /// <summary>Wysyła przycisk lub kółko do Maca; false = inne zdarzenie.</summary>
+    private bool ForwardButtonOrWheel(int msg, in MSLLHOOKSTRUCT d)
+    {
+        switch (msg)
+        {
+            case WM_LBUTTONDOWN: _client.SendMouseButton(0, true); return true;
+            case WM_LBUTTONUP: _client.SendMouseButton(0, false); return true;
+            case WM_RBUTTONDOWN: _client.SendMouseButton(1, true); return true;
+            case WM_RBUTTONUP: _client.SendMouseButton(1, false); return true;
+            case WM_MBUTTONDOWN: _client.SendMouseButton(2, true); return true;
+            case WM_MBUTTONUP: _client.SendMouseButton(2, false); return true;
+            case WM_XBUTTONDOWN:
+            case WM_XBUTTONUP:
+                _client.SendMouseButton(((d.mouseData >> 16) & 0xFFFF) == 1 ? 3 : 4, msg == WM_XBUTTONDOWN);
+                return true;
+            case WM_MOUSEWHEEL:
+                _client.SendMouseWheel(0, (short)((d.mouseData >> 16) & 0xFFFF));
+                return true;
+            case WM_MOUSEHWHEEL:
+                _client.SendMouseWheel((short)((d.mouseData >> 16) & 0xFFFF), 0);
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private bool TryDetectEdge(POINT pt, out float ratio, out RECT monitor)
     {
         var vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
@@ -234,6 +417,11 @@ public sealed class InputCapture : IDisposable
         // Ta metoda działa wewnątrz hooka niskiego poziomu – musi być szybka.
         // Wszystko, co dotyka UI (okno-przykrywka, dziennik), idzie przez Dispatcher.Post.
         _leaveMonitor = monitor;
+        // Przeciągane okno Maca jedzie przez krawędź na ekran Maca: Mac zachowuje wciśnięty
+        // przycisk, więc nie wysyłamy WINDOW_LEAVE (ono zwolniłoby przycisk).
+        _windowInput = false;
+        _windowButtons = 0;
+        _keyboardToMac = false;
         IsRemote = true;
         Interlocked.Exchange(ref _remoteMoves, 0);
         LastEnterUtc = DateTime.UtcNow;
@@ -359,7 +547,7 @@ public sealed class InputCapture : IDisposable
         var repeat = down && _keysDown.Contains(key);
         if (down) _keysDown.Add(key); else _keysDown.Remove(key);
 
-        if (!IsRemote) return false;
+        if (!IsRemote && !(_windowMode && _keyboardToMac && _client.IsConnected)) return false;
         _client.SendKey(scan, vk, ext, down, repeat);
         return true;
     }

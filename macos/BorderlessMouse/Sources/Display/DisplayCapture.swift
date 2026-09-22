@@ -31,6 +31,8 @@ final class DisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private let sampleQueue = DispatchQueue(label: "blm.display.capture", qos: .userInteractive)
     private var stream: SCStream?
+    /// W trybie okien kursor rysuje Windows (bez opóźnienia wideo), więc Mac go pomija.
+    private(set) var showsCursor = true
 
     static var hasPermission: Bool { CGPreflightScreenCaptureAccess() }
 
@@ -38,18 +40,20 @@ final class DisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     @discardableResult
     static func requestPermission() -> Bool { CGRequestScreenCaptureAccess() }
 
-    func start(displayID: CGDirectDisplayID, width: Int, height: Int) async throws {
+    func start(displayID: CGDirectDisplayID, width: Int, height: Int, showsCursor: Bool = true) async throws {
+        self.showsCursor = showsCursor
         guard Self.hasPermission else { throw CaptureError.permissionDenied }
         let display = try await Self.findDisplay(displayID)
         let filter = SCContentFilter(display: display, excludingWindows: [])
-        let stream = SCStream(filter: filter, configuration: Self.configuration(width: width, height: height), delegate: self)
+        let stream = SCStream(filter: filter, configuration: Self.configuration(width: width, height: height, showsCursor: showsCursor), delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
         try await stream.startCapture()
         self.stream = stream
     }
 
-    func update(width: Int, height: Int) async throws {
-        try await stream?.updateConfiguration(Self.configuration(width: width, height: height))
+    func update(width: Int, height: Int, showsCursor: Bool? = nil) async throws {
+        if let showsCursor { self.showsCursor = showsCursor }
+        try await stream?.updateConfiguration(Self.configuration(width: width, height: height, showsCursor: self.showsCursor))
     }
 
     func stop() {
@@ -58,7 +62,7 @@ final class DisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         stream.stopCapture { _ in }
     }
 
-    private static func configuration(width: Int, height: Int) -> SCStreamConfiguration {
+    private static func configuration(width: Int, height: Int, showsCursor: Bool) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
         config.width = width
         config.height = height
@@ -66,7 +70,7 @@ final class DisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         config.colorMatrix = CGDisplayStream.yCbCrMatrix_ITU_R_709_2
         config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         config.queueDepth = 5
-        config.showsCursor = true
+        config.showsCursor = showsCursor
         config.scalesToFit = true
         return config
     }

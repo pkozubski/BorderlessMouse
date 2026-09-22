@@ -17,6 +17,12 @@
   `--display-selftest` diagnostic.
 - Windows: "Mac display" card with a toggle, "show it whenever you control the Mac" option,
   status, throughput and restart.
+- **Window mode** (default): Windows shows only the Mac windows dragged onto the virtual
+  display, on its own desktop next to Windows apps. The real Windows pointer drives them with
+  absolute positions (no video latency), the keyboard follows the last clicked window, dropping
+  a window hands the pointer to Windows, and dragging it back across the Mac-side edge returns it
+  to the MacBook. New messages `MOUSE_ABSOLUTE`, `WINDOW_ENTER/LEAVE/HANDOFF`,
+  `DISPLAY_MODE`, `DISPLAY_WINDOWS` and STATUS bit 6.
 - The virtual display is entered only while dragging (a mouse button is held); plain pointer
   movement across that edge still returns to Windows.
 - Windows: `Ctrl + Alt + Shift + B` emergency shortcut for compact keyboards without

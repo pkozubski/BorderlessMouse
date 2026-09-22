@@ -56,8 +56,13 @@
                         <ToggleSwitch Classes="compact" IsChecked="{Binding DisplayEnabled}" />
                     </views:SettingRow>
                     <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Tylko okna Maca"
+                                      Subtitle="Okna Maca leżą na pulpicie Windows obok zwykłych okien. Wyłączone: cały pulpit Maca na monitorze.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding DisplayWindowMode}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
                     <views:SettingRow Title="Pokazuj go przez cały czas sterowania Makiem"
-                                      Subtitle="Wyłączone: ekran Maca pojawia się dopiero, gdy kursor wejdzie na niego z ekranu Maca.">
+                                      Subtitle="Tylko dla całego pulpitu. Wyłączone: pulpit Maca pojawia się dopiero, gdy przeciągniesz na niego okno.">
                         <ToggleSwitch Classes="compact" IsChecked="{Binding ShowMacDisplayWhileRemote}" />
                     </views:SettingRow>
                     <Rectangle Classes="divider" />

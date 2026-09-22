@@ -44,6 +44,8 @@ public sealed class DisplayViewer : IDisposable
     private bool _wantVisible;
     private bool _visible;
     private bool _hasPicture;
+    /// <summary>null = cały monitor (pełny pulpit); inaczej tylko okna Maca (współrzędne okna).</summary>
+    private RECT[]? _region;
     private ID3D11Device? _device;
     private ID3D11DeviceContext? _context;
     private ID3D11VideoDevice? _videoDevice;
@@ -115,6 +117,39 @@ public sealed class DisplayViewer : IDisposable
         _wake.Set();
     }
 
+    /// <summary>
+    /// Tryb okien: obraz tylko w tych prostokątach (względem monitora), reszta to pulpit
+    /// Windows – kliknięcia obok okien Maca trafiają do aplikacji Windows. null = cały monitor.
+    /// </summary>
+    public void SetRegion(RECT[]? rects)
+    {
+        _commands.Enqueue(() =>
+        {
+            _region = rects;
+            ApplyRegion();
+            ApplyVisibility();
+        });
+        _wake.Set();
+    }
+
+    private void ApplyRegion()
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        if (_region is null)
+        {
+            SetWindowRgn(_hwnd, IntPtr.Zero, true);
+            return;
+        }
+        var region = CreateRectRgn(0, 0, 0, 0);
+        foreach (var rect in _region)
+        {
+            var part = CreateRectRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
+            CombineRgn(region, region, part, RGN_OR);
+            DeleteObject(part);
+        }
+        if (SetWindowRgn(_hwnd, region, true) == 0) DeleteObject(region);
+    }
+
     public void SetVisible(bool visible)
     {
         _commands.Enqueue(() =>
@@ -133,6 +168,7 @@ public sealed class DisplayViewer : IDisposable
         {
             CreateWindow();
             CreateDevice();
+            ApplyRegion();
             var handles = new[] { _wake.SafeWaitHandle.DangerousGetHandle() };
             while (_running)
             {
@@ -398,7 +434,7 @@ public sealed class DisplayViewer : IDisposable
     {
         if (_hwnd == IntPtr.Zero) return;
         // Bez pierwszej klatki okno pokazałoby czarny ekran zamiast pulpitu Windows.
-        var show = _wantVisible && _hasPicture;
+        var show = _wantVisible && _hasPicture && (_region is null || _region.Length > 0);
         if (show == _visible) return;
         _visible = show;
         if (show)

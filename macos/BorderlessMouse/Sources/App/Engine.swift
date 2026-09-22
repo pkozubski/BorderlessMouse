@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Nieizolowany "silnik": łączy serwer TCP, discovery, wstrzykiwanie
@@ -61,6 +62,9 @@ final class Engine {
     /// Ekran wirtualny: nil = brak, false = uruchamianie, true = działa.
     private var displayRunning: Bool?
     private var displayGeneration: UInt64 = 0
+    private var displayMode: DisplayMode = .fullscreen
+    private var displayID: CGDirectDisplayID?
+    private let windowTracker = WindowTracker()
 
     init(config: Config) {
         self.config = config
@@ -227,6 +231,12 @@ final class Engine {
         injector.onVirtualDisplayFocus = { [weak self] focused in
             self?.server.send(Frame.displayFocus(focused))
         }
+        injector.onVirtualDrop = { [weak self] point in
+            guard let self, let id = self.displayID else { return }
+            let bounds = CGDisplayBounds(id)
+            self.server.send(Frame.windowHandoff(x: WindowTracker.normalize(point.x - bounds.minX, bounds.width - 1),
+                                                 y: WindowTracker.normalize(point.y - bounds.minY, bounds.height - 1)))
+        }
         display.onStopped = { [weak self] message in
             self?.eventsQueue.async {
                 guard let self, self.displayRunning != nil else { return }
@@ -277,6 +287,7 @@ final class Engine {
         if VirtualDisplay.isSupported { flags.insert(.displaySupported) }
         if config.displayEnabled { flags.insert(.displayEnabled) }
         if displayRunning == true { flags.insert(.displayStreaming) }
+        if VirtualDisplay.isSupported { flags.insert(.windowModeSupported) }
         server.send(Frame.status(flags))
     }
 
@@ -340,6 +351,18 @@ final class Engine {
             stopDisplayLocked(notify: true, reason: nil)
         case .displayKeyframe:
             display.requestKeyframe()
+            windowTracker.resend()
+        case .displayMode:
+            guard let raw = r.u8(), let mode = DisplayMode(rawValue: raw) else { return }
+            applyDisplayMode(mode)
+        case .windowEnter:
+            guard displayMode == .windows, let id = displayID, let x = r.u16(), let y = r.u16() else { return }
+            injector.windowEnter(at: WindowTracker.point(x: x, y: y, on: id))
+        case .mouseAbsolute:
+            guard let id = displayID, let x = r.u16(), let y = r.u16() else { return }
+            injector.windowMove(to: WindowTracker.point(x: x, y: y, on: id))
+        case .windowLeave:
+            injector.windowLeave(keepKeyboard: r.u8() == 1)
         default:
             break
         }
@@ -370,6 +393,7 @@ final class Engine {
         displayGeneration &+= 1
         let generation = displayGeneration
         displayRunning = false
+        displayMode = request.mode
         let name = L10n.text("BorderlessMouse (\(peer?.name ?? "Windows"))", "BorderlessMouse (\(peer?.name ?? "Windows"))")
         emit(.log(L10n.text("Tworzenie ekranu wirtualnego \(request.pixelWidth)×\(request.pixelHeight) (skala \(request.scalePercent)%)",
                             "Creating a \(request.pixelWidth)×\(request.pixelHeight) virtual display (\(request.scalePercent)% scale)")))
@@ -382,7 +406,9 @@ final class Engine {
                 switch result {
                 case let .success(ready):
                     self.displayRunning = true
+                    self.displayID = ready.displayID
                     self.injector.virtualDisplayID = ready.displayID
+                    self.applyDisplayMode(self.displayMode)
                     self.server.send(Frame.displayReady(status: 0, port: ready.port, key: ready.key, token: ready.token,
                                                         pixelWidth: ready.width, pixelHeight: ready.height, message: ""))
                     let desc = "\(ready.width)×\(ready.height) · H.264 \(ready.bitrate / 1_000_000) Mb/s"
@@ -401,11 +427,34 @@ final class Engine {
         }
     }
 
+    /// Pełny pulpit albo same okna Maca na pulpicie Windows.
+    private func applyDisplayMode(_ mode: DisplayMode) {
+        displayMode = mode
+        guard displayRunning == true, let id = displayID else { return }
+        display.setShowsCursor(mode == .fullscreen)
+        injector.handsOffDroppedWindows = mode == .windows
+        if mode == .windows {
+            windowTracker.start(displayID: id) { [weak self] rects in
+                self?.server.send(Frame.displayWindows(rects))
+            }
+        } else {
+            windowTracker.stop()
+            injector.windowLeave(keepKeyboard: false)
+        }
+        emit(.log(mode == .windows
+                  ? L10n.text("Ekran wirtualny: tryb okien", "Virtual display: window mode")
+                  : L10n.text("Ekran wirtualny: pełny pulpit", "Virtual display: full desktop")))
+    }
+
     /// `reason` != nil: Windows dostaje komunikat, że strumień się zakończył.
     private func stopDisplayLocked(notify: Bool, reason: String?) {
         displayGeneration &+= 1
         guard displayRunning != nil else { return }
         displayRunning = nil
+        displayID = nil
+        windowTracker.stop()
+        injector.handsOffDroppedWindows = false
+        injector.windowLeave(keepKeyboard: false)
         injector.virtualDisplayID = nil
         display.stop()
         if let reason, peer != nil { server.send(Frame.displayFailed(reason)) }

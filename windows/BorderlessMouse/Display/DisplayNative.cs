@@ -51,6 +51,22 @@ internal static class DisplayNative
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc callback, IntPtr data);
 
+    public const int RGN_OR = 2;
+
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll")]
+    public static extern int CombineRgn(IntPtr destination, IntPtr source1, IntPtr source2, int mode);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DeleteObject(IntPtr handle);
+
+    /// <summary>Po udanym wywołaniu system przejmuje uchwyt regionu.</summary>
+    [DllImport("user32.dll")]
+    public static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, [MarshalAs(UnmanagedType.Bool)] bool redraw);
+
     [DllImport("shcore.dll")]
     public static extern int GetDpiForMonitor(IntPtr hMonitor, int dpiType, out uint dpiX, out uint dpiY);
 

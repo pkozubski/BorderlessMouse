@@ -74,9 +74,16 @@ struct SecurityChecks {
     }
 
     static func checkVirtualDisplayProtocol() {
-        let request = DisplayStartRequest(pixelWidth: 2560, pixelHeight: 1440, scalePercent: 125, edge: .right, maxBitrateKbps: 20_000)
-        expect(request.payload.count == DisplayStartRequest.payloadBytes, "display start payload size")
+        let request = DisplayStartRequest(pixelWidth: 2560, pixelHeight: 1440, scalePercent: 125, edge: .right,
+                                          maxBitrateKbps: 20_000, mode: .windows)
+        expect(request.payload == Array(data("000aa0057d000100204e000001")), "display start layout (shared with Windows)")
         expect(DisplayStartRequest(payload: request.payload) == request, "display start round trip")
+        expect(DisplayStartRequest(payload: Array(request.payload.prefix(12)))?.mode == .fullscreen,
+               "display start without mode byte means full desktop")
+        let windows = Frame.displayWindows([NormalizedRect(x: 1, y: 2, width: 0x8000, height: 0xFFFF, flags: NormalizedRect.menuBar)])
+        expect(windows == data("860a" + "01" + "0100" + "0200" + "0080" + "ffff" + "01"), "display windows layout")
+        expect(Frame.windowHandoff(x: 0x1234, y: 0xFFFF) == data("34041234ffff".replacingOccurrences(of: "1234", with: "3412")),
+               "window handoff layout")
         var badCodec = request.payload
         badCodec[7] = 9
         expect(DisplayStartRequest(payload: badCodec) == nil, "unknown video codec rejected")

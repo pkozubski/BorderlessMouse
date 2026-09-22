@@ -13,8 +13,9 @@ Scenariusz, na który jest zbudowana ta wersja:
 * **Windows → Mac**: fizyczna klawiatura i mysz podpięte do Windowsa sterują Makiem
   (kursor przechodzi przez krawędź ekranu jak w Synergy/Barrier).
 * **Mac → Windows**: cały dźwięk systemowy Maca gra na słuchawkach/głośnikach Windowsa.
-* **Ekran wirtualny Maca na Windowsie** (eksperymentalne): monitor Windowsa staje się drugim
-  ekranem Maca. Przeciągnij okno na Macu w stronę Windowsa, a pojawi się na ekranie Windowsa.
+* **Okna Maca na Windowsie** (eksperymentalne): przeciągnij okno na Macu w stronę Windowsa,
+  a pojawi się na pulpicie Windows obok zwykłych okien i będzie działać zwykłym kursorem.
+  Alternatywnie cały pulpit Maca na monitorze Windows.
   Szczegóły w sekcji [Ekran wirtualny](#ekran-wirtualny-maca-na-windowsie).
 * **Schowek w obie strony**: kopiuj i wklejaj tekst, zdjęcia i zrzuty ekranu
   między komputerami (bez przełączania kursora). Zmiany wykrywamy co ok. 0,5 s;
@@ -208,8 +209,19 @@ Jak z tego korzystać:
 5. Dalsza krawędź ekranu wirtualnego (albo skrót awaryjny) wraca do Windowsa – obraz Maca
    znika, a kursor Windows pojawia się tam, gdzie był na obrazie.
 
-Opcja **Pokazuj go przez cały czas sterowania Makiem** (Windows) wyświetla ekran Maca od
-razu po przejściu na Maca, nie dopiero po wejściu kursorem na ekran wirtualny.
+**Tryb okien** (domyślny, przełącznik „Tylko okna Maca” na Windowsie): zamiast całego
+pulpitu Windows pokazuje tylko okna Maca, które przeciągnąłeś na ekran wirtualny – leżą na
+pulpicie Windows obok zwykłych okien.
+
+* Nad oknem Maca działa zwykły kursor Windows (bez opóźnienia obrazu); kliknięcia,
+  przewijanie i przeciąganie trafiają do Maca, obok okna – do Windows.
+* Klawiatura pisze w oknie, które kliknąłeś ostatnio: w oknie Maca albo w aplikacji Windows.
+  Gdy okno Maca ma klawiaturę, u góry monitora widać też pasek menu Maca.
+* Okno wraca na MacBooka, gdy przeciągniesz je przez krawędź monitora po stronie Maca.
+* Okna Maca są zawsze nad oknami Windows (jak okna „zawsze na wierzchu”).
+
+W trybie całego pulpitu opcja **Pokazuj go przez cały czas sterowania Makiem** wyświetla
+pulpit Maca od razu po przejściu na Maca, nie dopiero po przeciągnięciu na niego okna.
 
 Dobrze wiedzieć:
 

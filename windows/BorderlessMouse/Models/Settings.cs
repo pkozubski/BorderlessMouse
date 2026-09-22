@@ -46,6 +46,8 @@ public sealed class Settings
     public bool DisplayEnabled { get; set; } = true;
     /// <summary>false = ekran Maca tylko, gdy kursor jest na nim; true = przez cały czas sterowania Makiem.</summary>
     public bool ShowMacDisplayWhileRemote { get; set; }
+    /// <summary>true = tylko okna Maca na pulpicie Windows; false = cały pulpit ekranu wirtualnego.</summary>
+    public bool DisplayWindowMode { get; set; } = true;
 
     public bool AutoCheckUpdates { get; set; } = true;
 

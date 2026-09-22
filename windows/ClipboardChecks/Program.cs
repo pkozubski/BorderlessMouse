@@ -278,8 +278,15 @@ internal static class Program
     private static void RunVirtualDisplayChecks()
     {
         static byte[] Hex(string value) => Convert.FromHexString(value);
-        Expect(Frame.DisplayStart(2560, 1440, 125, ScreenEdge.Right, 20_000).SequenceEqual(Hex("800c" + "000aa0057d000100204e0000")),
+        Expect(Frame.DisplayStart(2560, 1440, 125, ScreenEdge.Right, 20_000, DisplayMode.Windows).SequenceEqual(Hex("800d" + "000aa0057d000100204e000001")),
             "DISPLAY_START matches the Mac layout");
+        Expect(Frame.SetDisplayMode(DisplayMode.Fullscreen).SequenceEqual(Hex("850100")), "DISPLAY_MODE");
+        Expect(Frame.WindowEnter(0x1234, 0xFFFF).SequenceEqual(Hex("32043412ffff")) && Frame.MouseAbsolute(1, 2).SequenceEqual(Hex("130401000200"))
+               && Frame.WindowLeave(true).SequenceEqual(Hex("330101")), "window input frames");
+        var windowsList = Frame.ParseDisplayWindows(Hex("01" + "0100" + "0200" + "0080" + "ffff" + "01"));
+        Expect(windowsList is [{ X: 1, Y: 2, Width: 0x8000, Height: 0xFFFF, Flags: NormalizedRect.MenuBar }], "DISPLAY_WINDOWS from the Mac layout");
+        Expect(Frame.ParseDisplayWindows(Hex("02" + "0100020000800000ff")) is null, "truncated DISPLAY_WINDOWS rejected");
+        Expect(Frame.ParseWindowHandoff(Hex("3412ffff")) == (0x1234, 0xFFFF), "WINDOW_HANDOFF from the Mac layout");
         Expect(Frame.DisplayStop().SequenceEqual(Hex("8100")) && Frame.DisplayKeyframe().SequenceEqual(Hex("8300")), "display control frames");
 
         var key = Enumerable.Range(0, 32).Select(i => (byte)(i * 7 & 0xFF)).ToArray();

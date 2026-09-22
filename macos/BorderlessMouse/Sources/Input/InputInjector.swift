@@ -26,8 +26,19 @@ final class InputInjector {
         }
     }
 
+    /// Tryb okien: upuszczenie przeciąganego okna na ekranie wirtualnym oddaje kursor Windowsowi.
+    var handsOffDroppedWindows = false
+    /// Okno upuszczone na ekranie wirtualnym (punkt w globalnych współrzędnych macOS).
+    var onVirtualDrop: ((CGPoint) -> Void)?
+
     private(set) var isActive = false
     private(set) var isOnVirtualDisplay = false
+    /// Tryb okien: kursor Windows jest nad oknem Maca i steruje nim w pozycjach bezwzględnych.
+    private(set) var isWindowInput = false
+    /// Tryb okien: klawiatura należy do ostatnio klikniętego okna Maca, także gdy kursor jest obok.
+    private(set) var hasWindowKeyboard = false
+    private var acceptsInput: Bool { isActive || isWindowInput }
+    private var acceptsKeys: Bool { isActive || isWindowInput || hasWindowKeyboard }
     private var position = CGPoint.zero
     private var returnEdge: ScreenEdge = .right
     private var currentDisplay = Display(id: 0, bounds: .zero)
@@ -119,6 +130,10 @@ final class InputInjector {
         }
         currentDisplay = displays.first { $0.bounds == target } ?? Display(id: 0, bounds: target)
         returnEdge = edge
+        // Przeciąganie okna z Windowsa przez krawędź: przycisk zostaje wciśnięty,
+        // a okno jedzie za kursorem na ekran Maca.
+        isWindowInput = false
+        hasWindowKeyboard = false
         // Po ręcznym przełączeniu (Scroll Lock) kursor mógł zostać na ekranie wirtualnym.
         setVirtualFocus(false)
         if !isActive {
@@ -128,10 +143,36 @@ final class InputInjector {
         postMouse(.mouseMoved, dx: 0, dy: 0)
     }
 
+    // MARK: - Tryb okien (pozycje bezwzględne)
+
+    func windowEnter(at point: CGPoint) {
+        if isActive { deactivate() }
+        isWindowInput = true
+        hasWindowKeyboard = true
+        position = point
+        postMouse(dragTypeForCurrentButtons(), dx: 0, dy: 0, button: dragButton())
+    }
+
+    func windowMove(to point: CGPoint) {
+        guard isWindowInput else { return }
+        let dx = Int(point.x - position.x), dy = Int(point.y - position.y)
+        position = point
+        postMouse(dragTypeForCurrentButtons(), dx: dx, dy: dy, button: dragButton())
+    }
+
+    /// Kursor zszedł z okna Maca. `keepKeyboard`: klawiatura nadal pisze w tym oknie.
+    func windowLeave(keepKeyboard: Bool) {
+        if isWindowInput || !keepKeyboard { releaseAll() }
+        isWindowInput = false
+        hasWindowKeyboard = keepKeyboard
+    }
+
     /// Kończy sterowanie (np. rozłączenie) – zwalnia wszystko.
     func deactivate() {
         releaseAll()
         setVirtualFocus(false)
+        isWindowInput = false
+        hasWindowKeyboard = false
         if isActive {
             isActive = false
             onActiveChanged?(false)
@@ -191,7 +232,7 @@ final class InputInjector {
     }
 
     func button(_ id: Int, down: Bool) {
-        guard isActive else { return }
+        guard acceptsInput else { return }
         let cgButton: CGMouseButton
         let type: CGEventType
         switch id {
@@ -220,11 +261,18 @@ final class InputInjector {
         ev.setIntegerValueField(.mouseEventClickState, value: Int64(clickCount[id] ?? 1))
         ev.setIntegerValueField(.mouseEventButtonNumber, value: Int64(id))
         ev.post(tap: .cghidEventTap)
+        // Tryb okien: okno przeciągnięte z MacBooka zostało upuszczone na ekranie
+        // wirtualnym – dalej steruje nim zwykły kursor Windows.
+        if !down, isActive, isOnVirtualDisplay, handsOffDroppedWindows, buttonsDown.isEmpty {
+            let point = position
+            deactivate()
+            onVirtualDrop?(point)
+        }
     }
 
     /// dx/dy w jednostkach Windows (120 = jeden ząbek kółka).
     func wheel(dx: Int, dy: Int) {
-        guard isActive else { return }
+        guard acceptsInput else { return }
         let invert: Bool
         if let forced = invertScroll {
             invert = forced
@@ -256,7 +304,7 @@ final class InputInjector {
     // MARK: - Klawiatura
 
     func key(scancode: UInt16, vk: UInt16, extended: Bool, down: Bool, isRepeat: Bool) {
-        guard isActive else { return }
+        guard acceptsKeys else { return }
         guard let target = KeyMap.lookup(scancode: scancode, vk: vk, extended: extended) else { return }
         switch target {
         case .media(let code):
