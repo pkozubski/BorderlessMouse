@@ -219,6 +219,21 @@ internal static class DisplayNative
 
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool Ellipse(IntPtr dc, int left, int top, int right, int bottom);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern UIntPtr SetTimer(IntPtr hWnd, UIntPtr id, uint elapse, IntPtr callback);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool KillTimer(IntPtr hWnd, UIntPtr id);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool RoundRect(IntPtr dc, int left, int top, int right, int bottom, int width, int height);
 
     /// <summary>Po udanym wywołaniu system przejmuje uchwyt regionu.</summary>

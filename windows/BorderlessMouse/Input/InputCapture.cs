@@ -39,6 +39,8 @@ public sealed class InputCapture : IDisposable
 
     /// <summary>Liczba ruchów myszy wysłanych do Maca w bieżącej sesji zdalnej.</summary>
     public long RemoteMovesSent => Interlocked.Read(ref _remoteMoves);
+    /// <summary>Pozycja wzdłuż krawędzi przy ostatnim przejściu na Maca (0…1).</summary>
+    public float LastEnterRatio { get; private set; }
     /// <summary>Czas ostatniego ENTER (UTC) – do wykrywania natychmiastowego odrzucenia przez Maca.</summary>
     public DateTime LastEnterUtc { get; private set; } = DateTime.MinValue;
 
@@ -415,6 +417,7 @@ public sealed class InputCapture : IDisposable
         IsRemote = true;
         Interlocked.Exchange(ref _remoteMoves, 0);
         LastEnterUtc = DateTime.UtcNow;
+        LastEnterRatio = ratio;
         ReleaseLocalKeys();
         _speedRemainderX = _speedRemainderY = 0;
         _client.SendEnter(entryEdge, ratio);

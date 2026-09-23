@@ -68,6 +68,7 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x37 | WINDOW_RESIZE | W → M | `u32 windowID`, `u16 w`, `u16 h` – maksymalizacja lub zmiana rozmiaru ramką Windows (piksele ekranu wirtualnego) |
 | 0x38 | MENU_INVOKE | W → M | `i32 pid`, `u16 index` – wybrano pozycję menu aplikacji |
 | 0x39 | MENU_REQUEST | W → M | `i32 pid` – prośba o aktualne menu (aktywacja okna, otwarcie menu) |
+| 0x3A | WINDOW_RETURN | W → M | `u32 windowID`, `f32 ratio` – okno przeciągnięte za pasek menu do krawędzi po stronie Maca wraca na fizyczny ekran przy miejscu wejścia kursora (wysyłane zaraz po `ENTER`) |
 | 0x40 | AUDIO_START | W → M | `u16 udpPort`, `u8 format` |
 | 0x41 | AUDIO_STOP | W → M | – |
 | 0x42 | AUDIO_FORMAT | M → W | `u32 rate`, `u8 channels`, `u8 format`, `u8 status`, komunikat |

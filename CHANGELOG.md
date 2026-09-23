@@ -21,7 +21,8 @@
   Windows window styled like macOS — rounded corners, the Mac window's own title bar, and a dark
   macOS-style menu bar above it with the app's menu (read through Accessibility, with shortcuts
   and disabled/checked states) instead of the Mac menu bar; dragging and double-click maximize
-  from that bar (the Mac window is resized to match); tiny helper windows are skipped; taskbar button with the Mac
+  from that bar (the Mac window is resized to match), macOS-style close/minimize/maximize buttons
+  on the bar, and dragging the bar to the Mac-side edge sends the window back to the MacBook; tiny helper windows are skipped; taskbar button with the Mac
   app icon, Alt+Tab, normal z-order, closing closes it on the Mac. Each window is captured independently (ScreenCaptureKit) and
   streamed separately, so moving it never reveals the wallpaper and corners are rounded like on
   macOS. The real Windows pointer drives it (absolute positions, clicks also activate the

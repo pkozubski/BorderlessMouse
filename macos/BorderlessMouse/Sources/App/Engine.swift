@@ -64,6 +64,8 @@ final class Engine {
     private var displayRunning: Bool?
     private var displayGeneration: UInt64 = 0
     private var displayMode: DisplayMode = .fullscreen
+    /// Krawędź Maca zwrócona w stronę Windowsa (tam stoi ekran wirtualny).
+    private var displayEdge: ScreenEdge = .right
     private var displayID: CGDirectDisplayID?
     private let windowTracker = WindowTracker()
     /// Tryb okien: ostatnia lista (do podnoszenia i zamykania okien z Windowsa).
@@ -371,6 +373,13 @@ final class Engine {
             let scale = WindowTracker.pixelScale(of: displayID)
             let size = CGSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
             DispatchQueue.main.async { WindowControl.resize(windowID: id, pid: window.pid, frame: window.frame, to: size) }
+        case .windowReturn:
+            guard let id = r.u32(), let ratio = r.f32(), let window = trackedWindows[id], let displayID else { return }
+            let edge = displayEdge
+            DispatchQueue.main.async {
+                WindowControl.returnToMac(windowID: id, pid: window.pid, frame: window.frame, edge: edge,
+                                          ratio: CGFloat(min(max(ratio, 0), 1)), excluding: displayID)
+            }
         case .menuRequest:
             guard let raw = r.u32(), displayMode == .windows else { return }
             sendMenu(pid: Int32(bitPattern: raw))
@@ -424,6 +433,7 @@ final class Engine {
         let generation = displayGeneration
         displayRunning = false
         displayMode = request.mode
+        displayEdge = request.edge
         let name = L10n.text("BorderlessMouse (\(peer?.name ?? "Windows"))", "BorderlessMouse (\(peer?.name ?? "Windows"))")
         emit(.log(L10n.text("Tworzenie ekranu wirtualnego \(request.pixelWidth)×\(request.pixelHeight) (skala \(request.scalePercent)%)",
                             "Creating a \(request.pixelWidth)×\(request.pixelHeight) virtual display (\(request.scalePercent)% scale)")))

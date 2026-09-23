@@ -49,6 +49,7 @@ public enum MessageType : byte
     WindowResize = 0x37,
     MenuInvoke = 0x38,
     MenuRequest = 0x39,
+    WindowReturn = 0x3A,
     AudioStart = 0x40,
     AudioStop = 0x41,
     AudioFormat = 0x42,
@@ -335,6 +336,15 @@ public static class Frame
         BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)Math.Clamp(width, 1, 65535));
         BinaryPrimitives.WriteUInt16LittleEndian(p[6..], (ushort)Math.Clamp(height, 1, 65535));
         return Make(MessageType.WindowResize, p);
+    }
+
+    /// <summary>Okno przeciągnięte do krawędzi po stronie Maca wraca na ekran Maca (<paramref name="ratio"/> wzdłuż krawędzi).</summary>
+    public static byte[] WindowReturn(uint id, float ratio)
+    {
+        Span<byte> p = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, id);
+        BinaryPrimitives.WriteSingleLittleEndian(p[4..], ratio);
+        return Make(MessageType.WindowReturn, p);
     }
 
     public static byte[] MenuRequest(int pid) => WindowCommand(MessageType.MenuRequest, unchecked((uint)pid));

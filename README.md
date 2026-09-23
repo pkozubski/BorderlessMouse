@@ -216,8 +216,12 @@ które przeciągniesz na ekran wirtualny, staje się zwykłym oknem Windows.
   przycisk działają na Macu), a nad nim ciemny pasek menu aplikacji w stylu macOS (nazwa
   aplikacji, Plik, Edycja, Widok…). Kliknięcie rozwija menu ze skrótami i wyszarzeniami,
   a wybranie pozycji wywołuje ją na Macu. Pasek menu Maca nie jest potrzebny.
+* Po lewej stronie paska są przyciski okna jak w macOS (zamknij, minimalizuj, maksymalizuj) –
+  działają w każdej aplikacji, także tej, która ukrywa własne.
 * Za pusty fragment paska menu okno można przeciągnąć (także na inny monitor), a podwójne
   kliknięcie maksymalizuje je na cały monitor (okno na Macu dostaje ten sam rozmiar).
+  Przeciągnięcie za pasek do krawędzi monitora po stronie Maca odsyła okno na MacBooka
+  razem z kursorem.
   Rozmiar zmienia się też za krawędzie okna Maca.
 * Ma przycisk na pasku zadań (z ikoną aplikacji Maca), jest w Alt+Tab, da się je
   zminimalizować i schować za innymi oknami. Zamknięcie zamyka je na Macu.

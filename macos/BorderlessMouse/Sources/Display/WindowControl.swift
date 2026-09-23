@@ -36,6 +36,39 @@ enum WindowControl {
         AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
     }
 
+    /// Okno przeciągnięte na Windowsie do krawędzi po stronie Maca wraca na fizyczny ekran,
+    /// tuż przy miejscu, w którym pojawi się kursor (`ratio` wzdłuż krawędzi).
+    static func returnToMac(windowID: UInt32, pid: Int32, frame: CGRect, edge: ScreenEdge,
+                            ratio: CGFloat, excluding virtualDisplay: CGDirectDisplayID) {
+        guard let window = element(windowID: windowID, pid: pid, frame: frame) else { return }
+        let physical = VirtualDisplay.activeDisplays().filter { $0 != virtualDisplay }.map { CGDisplayBounds($0) }
+        let anchor: CGRect?
+        switch edge {
+        case .right: anchor = physical.max { $0.maxX < $1.maxX }
+        case .left: anchor = physical.min { $0.minX < $1.minX }
+        case .top: anchor = physical.min { $0.minY < $1.minY }
+        case .bottom: anchor = physical.max { $0.maxY < $1.maxY }
+        }
+        guard let a = anchor else { return }
+        let size = CGSize(width: min(frame.width, a.width), height: min(frame.height, a.height - 40))
+        let clampedX = { (x: CGFloat) in min(max(x, a.minX), a.maxX - size.width) }
+        let clampedY = { (y: CGFloat) in min(max(y, a.minY + 30), a.maxY - size.height) }
+        let origin: CGPoint
+        switch edge {
+        case .right: origin = CGPoint(x: a.maxX - size.width, y: clampedY(a.minY + ratio * a.height - 20))
+        case .left: origin = CGPoint(x: a.minX, y: clampedY(a.minY + ratio * a.height - 20))
+        case .top: origin = CGPoint(x: clampedX(a.minX + ratio * a.width - size.width / 2), y: a.minY + 30)
+        case .bottom: origin = CGPoint(x: clampedX(a.minX + ratio * a.width - size.width / 2), y: a.maxY - size.height)
+        }
+        var point = origin, newSize = size
+        if size != frame.size, let value = AXValueCreate(.cgSize, &newSize) {
+            AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+        }
+        if let value = AXValueCreate(.cgPoint, &point) {
+            AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
+        }
+    }
+
     /// Ikona aplikacji 64×64 w PNG – Windows pokazuje ją na pasku zadań i w Alt+Tab.
     static func iconPNG(pid: Int32) -> Data? {
         guard let icon = NSRunningApplication(processIdentifier: pid)?.icon else { return nil }

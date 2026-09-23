@@ -44,6 +44,7 @@ enum MessageType: UInt8 {
     case windowResize = 0x37
     case menuInvoke = 0x38
     case menuRequest = 0x39
+    case windowReturn = 0x3A
     case audioStart = 0x40
     case audioStop = 0x41
     case audioFormat = 0x42

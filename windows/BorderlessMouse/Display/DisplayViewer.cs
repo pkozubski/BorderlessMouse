@@ -61,6 +61,9 @@ public sealed class DisplayViewer : IDisposable
     private const uint WM_LBUTTONDOWN = 0x0201;
     private const uint WM_LBUTTONDBLCLK = 0x0203;
     private const uint WM_MOUSELEAVE = 0x02A3;
+    private const uint WM_TIMER = 0x0113;
+    private const uint WM_CANCELMODE = 0x001F;
+    private const int SW_MINIMIZE = 6;
     private const uint WM_ENTERSIZEMOVE = 0x0231;
     private const uint WM_EXITSIZEMOVE = 0x0232;
     private const long SC_KEYMENU = 0xF100;
@@ -79,6 +82,11 @@ public sealed class DisplayViewer : IDisposable
     private static readonly uint HeaderHover = Rgb(72, 72, 76);
     private static readonly uint HeaderText = Rgb(236, 236, 236);
     private static readonly uint HeaderDisabled = Rgb(130, 130, 134);
+    // Przyciski okna jak w macOS: zamknij, minimalizuj, maksymalizuj.
+    private static readonly uint[] LightColors = { Rgb(255, 95, 87), Rgb(254, 188, 46), Rgb(40, 200, 64) };
+    private static readonly uint[] LightGlyphColors = { Rgb(120, 20, 15), Rgb(140, 90, 10), Rgb(10, 90, 25) };
+    private static readonly string[] LightGlyphs = { "×", "–", "+" };
+    private const int LightNone = -1;
 
     private readonly ConcurrentQueue<VideoStream.VideoFrame> _frames = new();
     private readonly ConcurrentQueue<Action> _commands = new();
@@ -89,6 +97,8 @@ public sealed class DisplayViewer : IDisposable
     private volatile bool _running;
     private long _framesPresented;
     private long _lastKeyframeRequestTicks;
+    private volatile uint _movingWindowId;
+    private IntPtr _movingHandle;
     private volatile IReadOnlyDictionary<IntPtr, ProxyInfo> _proxies = new Dictionary<IntPtr, ProxyInfo>();
 
     // tylko wątek wyświetlania
@@ -125,6 +135,16 @@ public sealed class DisplayViewer : IDisposable
 
     /// <summary>Okna Windows reprezentujące okna Maca – bezpieczne do odczytu z dowolnego wątku.</summary>
     public IReadOnlyDictionary<IntPtr, ProxyInfo> Proxies => _proxies;
+
+    /// <summary>Okno Maca przeciągane teraz za pasek menu (0 = żadne).</summary>
+    public uint MovingWindowId => _movingWindowId;
+
+    /// <summary>Przerywa przeciąganie okna (np. gdy przechodzi na ekran Maca). Dowolny wątek.</summary>
+    public void CancelMove()
+    {
+        var handle = _movingHandle;
+        if (handle != IntPtr.Zero) PostMessageW(handle, WM_CANCELMODE, IntPtr.Zero, IntPtr.Zero);
+    }
 
     public DisplayViewer()
     {
@@ -242,8 +262,7 @@ public sealed class DisplayViewer : IDisposable
                     TranslateMessage(ref msg);
                     DispatchMessageW(ref msg);
                 }
-                while (_commands.TryDequeue(out var command)) command();
-                DecodePending();
+                Pump();
             }
         }
         catch (Exception ex)
@@ -254,6 +273,13 @@ public sealed class DisplayViewer : IDisposable
         {
             Cleanup();
         }
+    }
+
+    /// <summary>Polecenia i dekodowanie – także z pętli modalnej (przeciąganie, menu), inaczej obraz by stał.</summary>
+    private void Pump()
+    {
+        while (_commands.TryDequeue(out var command)) command();
+        DecodePending();
     }
 
     private void DecodePending()
@@ -489,6 +515,8 @@ public sealed class DisplayViewer : IDisposable
         public bool Maximized;
         public RECT RestoreClient;
         public int HoverItem = -1;
+        public int HoverLight = LightNone;
+        public List<(int left, int right)> LightBounds = new();
         public List<(int left, int right)> ItemBounds = new();
         public ushort CornerRadius;
         public int ShapeWidth, ShapeHeight, ShapeRadius = -1;
@@ -771,10 +799,13 @@ public sealed class DisplayViewer : IDisposable
                 return 1;
             case WM_MOUSEMOVE:
             {
-                var hover = HeaderItemAt(surface, (short)((long)lParam & 0xFFFF));
-                if (hover != surface.HoverItem)
+                var x = (short)((long)lParam & 0xFFFF);
+                var hover = HeaderItemAt(surface, x);
+                var light = LightAt(surface, x);
+                if (hover != surface.HoverItem || light != surface.HoverLight)
                 {
                     surface.HoverItem = hover;
+                    surface.HoverLight = light;
                     InvalidateRect(hWnd, IntPtr.Zero, false);
                 }
                 var track = new TRACKMOUSEEVENT { cbSize = (uint)Marshal.SizeOf<TRACKMOUSEEVENT>(), dwFlags = TME_LEAVE, hwndTrack = hWnd };
@@ -783,12 +814,18 @@ public sealed class DisplayViewer : IDisposable
             }
             case WM_MOUSELEAVE:
                 surface.HoverItem = -1;
+                surface.HoverLight = LightNone;
                 InvalidateRect(hWnd, IntPtr.Zero, false);
                 return IntPtr.Zero;
             case WM_LBUTTONDOWN:
             {
-                var item = HeaderItemAt(surface, (short)((long)lParam & 0xFFFF));
-                if (item >= 0) ShowHeaderMenu(surface, item);
+                var x = (short)((long)lParam & 0xFFFF);
+                var item = HeaderItemAt(surface, x);
+                var light = LightAt(surface, x);
+                if (light == 0) CloseRequested?.Invoke(surface.Id);
+                else if (light == 1) ShowWindow(surface.Handle, SW_MINIMIZE);
+                else if (light == 2) ToggleMaximize(surface);
+                else if (item >= 0) ShowHeaderMenu(surface, item);
                 else
                 {
                     // Puste miejsce paska: przeciąganie okna jak za pasek tytułu.
@@ -798,7 +835,8 @@ public sealed class DisplayViewer : IDisposable
                 return IntPtr.Zero;
             }
             case WM_LBUTTONDBLCLK:
-                if (HeaderItemAt(surface, (short)((long)lParam & 0xFFFF)) < 0) ToggleMaximize(surface);
+                var clicked = (short)((long)lParam & 0xFFFF);
+                if (HeaderItemAt(surface, clicked) < 0 && LightAt(surface, clicked) == LightNone) ToggleMaximize(surface);
                 return IntPtr.Zero;
         }
         return DefWindowProcW(hWnd, msg, wParam, lParam);
@@ -823,8 +861,35 @@ public sealed class DisplayViewer : IDisposable
             SetBkMode(dc, 1); // TRANSPARENT
             var items = HeaderItems(surface);
             var labels = items.Count > 0 ? items.Select(i => (i.Title, i.Enabled)).ToList() : new List<(string, bool)> { (surface.Title, true) };
+            // Przyciski okna jak w macOS; po najechaniu pokazują symbole.
+            surface.LightBounds.Clear();
+            var diameter = (int)Math.Round(12 * scale);
+            var lightX = (int)Math.Round(12 * scale);
+            var lightY = (surface.HeaderHeight - diameter) / 2;
+            var nullPen = SelectObject(dc, GetStockObject(8)); // NULL_PEN
+            var glyphFont = CreateFontW(-(int)Math.Round(11 * scale), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+            for (var i = 0; i < 3; i++)
+            {
+                var brush = CreateSolidBrush(LightColors[i]);
+                var previousBrush = SelectObject(dc, brush);
+                Ellipse(dc, lightX, lightY, lightX + diameter, lightY + diameter);
+                SelectObject(dc, previousBrush);
+                DeleteObject(brush);
+                if (surface.HoverLight != LightNone)
+                {
+                    SelectObject(dc, glyphFont);
+                    SetTextColor(dc, LightGlyphColors[i]);
+                    var glyph = new RECT { Left = lightX, Top = lightY - 1, Right = lightX + diameter, Bottom = lightY + diameter };
+                    DrawTextW(dc, LightGlyphs[i], LightGlyphs[i].Length, ref glyph, 0x1 | 0x4 | 0x20); // DT_CENTER | DT_VCENTER | DT_SINGLELINE
+                }
+                surface.LightBounds.Add((lightX - 3, lightX + diameter + 3));
+                lightX += diameter + (int)Math.Round(8 * scale);
+            }
+            SelectObject(dc, nullPen);
+            DeleteObject(glyphFont);
+
             surface.ItemBounds.Clear();
-            var x = (int)Math.Round(14 * scale);
+            var x = lightX + (int)Math.Round(12 * scale);
             var padding = (int)Math.Round(8 * scale);
             for (var i = 0; i < labels.Count; i++)
             {
@@ -857,6 +922,13 @@ public sealed class DisplayViewer : IDisposable
         {
             EndPaint(surface.Header, ref paint);
         }
+    }
+
+    private static int LightAt(Surface surface, int x)
+    {
+        for (var i = 0; i < surface.LightBounds.Count; i++)
+            if (x >= surface.LightBounds[i].left && x < surface.LightBounds[i].right) return i;
+        return LightNone;
     }
 
     private static int HeaderItemAt(Surface surface, int x)
@@ -1006,11 +1078,21 @@ public sealed class DisplayViewer : IDisposable
                 break;
             case WM_ENTERSIZEMOVE when topLevel:
                 surface!.InSizeMove = true;
+                _movingHandle = hWnd;
+                _movingWindowId = surface.Id;
+                // Pętla przeciągania jest modalna – licznik czasu pozwala dalej dekodować obraz.
+                SetTimer(hWnd, (UIntPtr)1, 15, IntPtr.Zero);
                 break;
             case WM_EXITSIZEMOVE when topLevel:
                 surface!.InSizeMove = false;
+                KillTimer(hWnd, (UIntPtr)1);
+                _movingWindowId = 0;
+                _movingHandle = IntPtr.Zero;
                 SyncClient(surface);
                 break;
+            case WM_TIMER when topLevel && surface!.InSizeMove:
+                Pump();
+                return IntPtr.Zero;
             case WM_MOVE when topLevel && surface!.Kind == SurfaceKind.Window:
                 SyncClient(surface);
                 break;

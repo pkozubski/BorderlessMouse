@@ -704,6 +704,13 @@ public partial class MainViewModel : ObservableObject
             {
                 CursorOnMac = remote;
                 if (!remote) _displayFocus = false; // Mac potwierdzi stan przy następnym wejściu
+                // Okno Maca przeciągnięte za pasek do krawędzi po stronie Maca: wraca na Maca
+                // (tam, gdzie pojawia się kursor), a przeciąganie na Windowsie się kończy.
+                if (remote && _viewer?.MovingWindowId is > 0 and var movingId && _client.IsConnected)
+                {
+                    _client.Send(Frame.WindowReturn(movingId, _capture!.LastEnterRatio));
+                    _viewer.CancelMove();
+                }
                 UpdateStatus();
                 UpdateViewerVisibility();
             };
