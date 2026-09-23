@@ -156,6 +156,11 @@ final class VirtualDisplay {
         return (Int(w) & ~3, Int(h) & ~3)
     }
 
+    /// Monitor utworzony przez BorderlessMouse (także zanim Engine zapamiętał jego identyfikator).
+    static func isOwn(_ id: CGDirectDisplayID) -> Bool {
+        CGDisplayVendorNumber(id) == vendorID && CGDisplaySerialNumber(id) == serialNumber
+    }
+
     static func activeDisplays() -> [CGDirectDisplayID] {
         var count: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }

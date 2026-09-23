@@ -611,7 +611,8 @@ final class Engine {
 
     /// Ekran Maca przy krawędzi zwróconej w stronę Windowsa – tam pokazujemy okna Windows.
     private static func facingScreen(edge: ScreenEdge, excluding virtual: CGDirectDisplayID?) -> CGDirectDisplayID {
-        let all = VirtualDisplay.activeDisplays().filter { $0 != virtual }
+        // Nigdy ekran wirtualny Maca dla Windowsa – także gdy dopiero powstaje.
+        let all = VirtualDisplay.activeDisplays().filter { $0 != virtual && !VirtualDisplay.isOwn($0) }
         guard !all.isEmpty else { return CGMainDisplayID() }
         switch edge {
         case .left: return all.min { CGDisplayBounds($0).minX < CGDisplayBounds($1).minX }!

@@ -970,6 +970,11 @@ public partial class MainViewModel : ObservableObject
     {
         try
         {
+            if (_winViewRunning && !info.IsOk)
+            {
+                OnWinViewFailed(T("Mac: ", "Mac: ") + info.Message);
+                return;
+            }
             if (!_winViewRequested || _winViewRunning || !OperatingSystem.IsWindows()) return;
             if (!info.IsOk)
             {

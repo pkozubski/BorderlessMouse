@@ -259,7 +259,17 @@ final class WinWindowProxies {
     }
 
     private func layout(_ proxy: Proxy) {
-        let d = proxy.descriptor
+        // Część okna poza monitorem Windows nie ma obrazu i nie może wyjść poza ekran Maca.
+        let full = proxy.descriptor
+        let left = max(Int(full.x), 0), top = max(Int(full.y), 0)
+        let right = min(Int(full.x) + Int(full.width), Int(displaySize.width))
+        let bottom = min(Int(full.y) + Int(full.height), Int(displaySize.height))
+        guard right > left, bottom > top else {
+            proxy.window.orderOut(nil)
+            return
+        }
+        let d = WinWindowDescriptor(id: full.id, x: Int32(left), y: Int32(top), width: UInt16(right - left),
+                                    height: UInt16(bottom - top), flags: full.flags, title: full.title)
         let sx = screen.width / displaySize.width, sy = screen.height / displaySize.height
         // Globalne CG (y w dół) → AppKit (y w górę od dołu ekranu głównego).
         let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.maxY
@@ -276,11 +286,12 @@ final class WinWindowProxies {
         proxy.clip.cornerRadius = maximized ? 0 : 8 * sx
         // Warstwa obrazu ma rozmiar całego monitora Windows i jest przesunięta tak,
         // żeby w oknie wypadł jego prostokąt (y w górę – warstwy AppKit nie są odwrócone).
-        let full = CGSize(width: displaySize.width * sx, height: displaySize.height * sy)
         proxy.image.frame = CGRect(x: -CGFloat(d.x) * sx,
                                    y: -(displaySize.height - CGFloat(d.y) - CGFloat(d.height)) * sy,
-                                   width: full.width, height: full.height)
+                                   width: displaySize.width * sx, height: displaySize.height * sy)
         if let surface { proxy.image.contents = surface }
         CATransaction.commit()
+        // Okno wróciło na monitor Windows po całkowitym zjechaniu z niego.
+        if !proxy.window.isVisible { proxy.window.orderFrontRegardless() }
     }
 }

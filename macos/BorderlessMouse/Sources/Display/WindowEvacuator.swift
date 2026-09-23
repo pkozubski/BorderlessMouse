@@ -19,7 +19,8 @@ enum WindowEvacuator {
             guard (window[kCGWindowLayer as String] as? Int) == 0,
                   let dict = window[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: dict as CFDictionary),
-                  virtual.contains(CGPoint(x: bounds.midX, y: bounds.midY)) else { return nil }
+                  virtual.contains(CGPoint(x: bounds.midX, y: bounds.midY)),
+                  (window[kCGWindowOwnerPID as String] as? pid_t) != getpid() else { return nil }
             return window[kCGWindowOwnerPID as String] as? pid_t
         })
         var moved = 0

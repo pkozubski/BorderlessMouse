@@ -66,6 +66,8 @@ final class WindowTracker {
             let isMenuBar = owner == "Window Server" && name == "Menubar"
             // Dock i elementy systemowe nie są oknami, które warto przenosić na Windows.
             if owner == "Dock" || (owner == "Window Server" && !isMenuBar) || alpha < 0.01 { continue }
+            // Własne okna (m.in. okna Windows pokazywane na Macu) nie mogą wracać na Windows.
+            if pid == getpid() { continue }
             let visible = bounds.intersection(display)
             guard !visible.isNull, visible.width > 2, visible.height > 2 else { continue }
             // Przezroczyste nakładki systemu i narzędzi (poza zwykłą warstwą 0) zajmują cały ekran.
