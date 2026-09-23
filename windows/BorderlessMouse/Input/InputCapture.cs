@@ -33,6 +33,8 @@ public sealed class InputCapture : IDisposable
     private bool _windowInput;
     private int _windowButtons;
     private uint _lastRaisedWindow;
+    /// <summary>Okno Maca, nad którym jest (albo które przeciąga) kursor.</summary>
+    private uint _windowId;
     private DateTime _windowGraceUntil = DateTime.MinValue;
 
     /// <summary>Liczba ruchów myszy wysłanych do Maca w bieżącej sesji zdalnej.</summary>
@@ -217,8 +219,13 @@ public sealed class InputCapture : IDisposable
         _macMonitor = monitor;
     }
 
-    /// <summary>Okno Maca pod punktem ekranu (identyfikator) – z listy okien podglądu.</summary>
-    public Func<POINT, uint?>? MacWindowAt { get; set; }
+    /// <summary>
+    /// Okno Maca pod punktem ekranu (tylko obszar klienta – ramkę obsługuje Windows)
+    /// i ten punkt przeliczony na ekran wirtualny (0…65535).
+    /// </summary>
+    public Func<POINT, (uint id, ushort x, ushort y)?>? MacWindowAt { get; set; }
+    /// <summary>Punkt ekranu względem wskazanego okna Maca (przeciąganie poza jego obszar).</summary>
+    public Func<uint, POINT, (ushort x, ushort y)?>? MapToMacWindow { get; set; }
     /// <summary>Aktywne okno Windows jest oknem Maca (klawiatura idzie do Maca).</summary>
     public Func<bool>? MacWindowIsForeground { get; set; }
 
@@ -238,40 +245,45 @@ public sealed class InputCapture : IDisposable
         SetCursorPos(point.X, point.Y);
         // Okno Windows dla upuszczonego okna powstaje chwilę później – do tego czasu ufamy Macowi.
         _windowGraceUntil = DateTime.UtcNow.AddMilliseconds(500);
-        EnterWindowInput(point);
+        var (x, y) = ToMac(point); // okno Windows jeszcze nie istnieje – leży tam, gdzie okno Maca
+        EnterWindowInput(0, x, y);
     }
 
     private bool HandleWindowMouse(int msg, in MSLLHOOKSTRUCT d)
     {
         var over = MacWindowAt?.Invoke(d.pt);
-        var inside = over is not null || DateTime.UtcNow < _windowGraceUntil;
+        var grace = DateTime.UtcNow < _windowGraceUntil;
         if (msg == WM_MOUSEMOVE)
         {
             if (_windowInput)
             {
-                // Przeciąganie trzyma kursor przy Macu także poza oknem (jak przechwycenie myszy).
-                if (!inside && _windowButtons == 0)
+                // Przeciąganie trzyma kursor przy oknie Maca także poza nim (jak przechwycenie myszy).
+                (ushort x, ushort y)? mapped = over is { } hit && (_windowButtons == 0 || hit.id == _windowId)
+                    ? (hit.x, hit.y)
+                    : _windowButtons > 0 && _windowId != 0 ? MapToMacWindow?.Invoke(_windowId, d.pt)
+                    : grace ? ToMac(d.pt) : null;
+                if (mapped is null)
                 {
                     LeaveWindowInput();
                     return false;
                 }
-                var (x, y) = ToMac(d.pt);
-                _client.Send(Frame.MouseAbsolute(x, y));
+                if (over is { } now && _windowButtons == 0) _windowId = now.id;
+                _client.Send(Frame.MouseAbsolute(mapped.Value.x, mapped.Value.y));
             }
-            else if (inside)
+            else if (over is { } hit)
             {
-                EnterWindowInput(d.pt);
+                EnterWindowInput(hit.id, hit.x, hit.y);
             }
             return false; // kursor Windows porusza się normalnie
         }
 
         if (!_windowInput) return false;
-        if (IsButtonDown(msg) && over is { } id && id != _lastRaisedWindow)
+        if (IsButtonDown(msg) && over is { } target && target.id != _lastRaisedWindow)
         {
             // Najpierw wyciągamy okno na wierzch na Macu – inaczej kliknięcie trafiłoby
             // w okno Maca, które tam leży wyżej, choć na Windowsie jest schowane.
-            _client.Send(Frame.WindowRaise(id));
-            _lastRaisedWindow = id;
+            _client.Send(Frame.WindowRaise(target.id));
+            _lastRaisedWindow = target.id;
         }
         if (!ForwardButtonOrWheel(msg, d)) return false;
         if (IsButtonDown(msg)) _windowButtons++;
@@ -283,11 +295,11 @@ public sealed class InputCapture : IDisposable
     /// <summary>Okno Maca aktywowane w Windowsie (np. Alt+Tab) – wyciągnięte na wierzch na Macu.</summary>
     public void NoteRaised(uint id) => _lastRaisedWindow = id;
 
-    private void EnterWindowInput(POINT pt)
+    private void EnterWindowInput(uint id, ushort x, ushort y)
     {
         _windowInput = true;
         _windowButtons = 0;
-        var (x, y) = ToMac(pt);
+        _windowId = id;
         _client.Send(Frame.WindowEnter(x, y));
     }
 

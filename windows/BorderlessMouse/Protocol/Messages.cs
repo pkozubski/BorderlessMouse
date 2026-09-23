@@ -46,6 +46,9 @@ public enum MessageType : byte
     WindowHandoff = 0x34,
     WindowRaise = 0x35,
     WindowClose = 0x36,
+    WindowResize = 0x37,
+    MenuInvoke = 0x38,
+    MenuRequest = 0x39,
     AudioStart = 0x40,
     AudioStop = 0x41,
     AudioFormat = 0x42,
@@ -61,7 +64,12 @@ public enum MessageType : byte
     DisplayMode = 0x85,
     DisplayWindows = 0x86,
     WindowIcon = 0x87,
+    WindowMenu = 0x88,
 }
+
+/// <summary>Pozycja menu aplikacji Maca (numer = kolejność przeglądania, od 0).</summary>
+public sealed record MacMenuItem(int Index, string Title, string Shortcut, bool Enabled, bool Separator, bool Checked,
+    IReadOnlyList<MacMenuItem> Children);
 
 /// <summary>Tryb ekranu wirtualnego: cały pulpit albo same okna Maca na pulpicie Windows.</summary>
 public enum DisplayMode : byte
@@ -319,6 +327,26 @@ public static class Frame
     /// <summary>Alt+F4 / zamknięcie z paska zadań – Mac naciska przycisk zamknięcia okna.</summary>
     public static byte[] WindowClose(uint id) => WindowCommand(MessageType.WindowClose, id);
 
+    /// <summary>Maksymalizacja lub zmiana rozmiaru ramką Windows (piksele ekranu wirtualnego).</summary>
+    public static byte[] WindowResize(uint id, int width, int height)
+    {
+        Span<byte> p = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, id);
+        BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)Math.Clamp(width, 1, 65535));
+        BinaryPrimitives.WriteUInt16LittleEndian(p[6..], (ushort)Math.Clamp(height, 1, 65535));
+        return Make(MessageType.WindowResize, p);
+    }
+
+    public static byte[] MenuRequest(int pid) => WindowCommand(MessageType.MenuRequest, unchecked((uint)pid));
+
+    public static byte[] MenuInvoke(int pid, int index)
+    {
+        Span<byte> p = stackalloc byte[6];
+        BinaryPrimitives.WriteInt32LittleEndian(p, pid);
+        BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)index);
+        return Make(MessageType.MenuInvoke, p);
+    }
+
     public static byte[] Ping(ulong ts)
     {
         Span<byte> p = stackalloc byte[8];
@@ -378,6 +406,48 @@ public static class Frame
         }
         return offset == p.Length && displayWidth > 0 && displayHeight > 0
             ? new MacWindowList(displayWidth, displayHeight, windows) : null;
+    }
+
+    /// <summary>Menu aplikacji: <c>i32 pid</c>, potem rekurencyjna lista pozycji (patrz PROTOCOL.md).</summary>
+    public static (int pid, IReadOnlyList<MacMenuItem> items)? ParseWindowMenu(ReadOnlySpan<byte> p)
+    {
+        if (p.Length < 6) return null;
+        var pid = BinaryPrimitives.ReadInt32LittleEndian(p);
+        var offset = 4;
+        var index = 0;
+        var items = ParseMenuList(p, ref offset, ref index, 0);
+        return items is not null && offset == p.Length ? (pid, items) : null;
+    }
+
+    private static List<MacMenuItem>? ParseMenuList(ReadOnlySpan<byte> p, ref int offset, ref int index, int depth)
+    {
+        if (depth > 8 || p.Length < offset + 2) return null;
+        int count = BinaryPrimitives.ReadUInt16LittleEndian(p[offset..]);
+        offset += 2;
+        var list = new List<MacMenuItem>(Math.Min(count, 256));
+        for (var i = 0; i < count; i++)
+        {
+            if (p.Length < offset + 2) return null;
+            var flags = p[offset++];
+            int titleLength = p[offset++];
+            if (p.Length < offset + titleLength + 1) return null;
+            var title = Encoding.UTF8.GetString(p.Slice(offset, titleLength));
+            offset += titleLength;
+            int shortcutLength = p[offset++];
+            if (p.Length < offset + shortcutLength) return null;
+            var shortcut = Encoding.UTF8.GetString(p.Slice(offset, shortcutLength));
+            offset += shortcutLength;
+            var itemIndex = index++;
+            IReadOnlyList<MacMenuItem> children = Array.Empty<MacMenuItem>();
+            if ((flags & 8) != 0)
+            {
+                var sub = ParseMenuList(p, ref offset, ref index, depth + 1);
+                if (sub is null) return null;
+                children = sub;
+            }
+            list.Add(new MacMenuItem(itemIndex, title, shortcut, (flags & 1) != 0, (flags & 2) != 0, (flags & 4) != 0, children));
+        }
+        return list;
     }
 
     public static (int pid, byte[] png)? ParseWindowIcon(ReadOnlySpan<byte> p)

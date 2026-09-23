@@ -91,6 +91,39 @@ internal static class DisplayNative
 
     public const uint GA_ROOT = 2;
 
+    public const uint MF_STRING = 0x0000;
+    public const uint MF_GRAYED = 0x0001;
+    public const uint MF_CHECKED = 0x0008;
+    public const uint MF_POPUP = 0x0010;
+    public const uint MF_SEPARATOR = 0x0800;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AdjustWindowRectEx(ref RECT rect, uint style, [MarshalAs(UnmanagedType.Bool)] bool menu, uint exStyle);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreateMenu();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreatePopupMenu();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AppendMenuW(IntPtr menu, uint flags, UIntPtr idOrSubmenu, string? text);
+
+    /// <summary>Menu okna (<c>SetMenu</c> z user32 – nazwa zmieniona, żeby nie kolidować z metodą podglądu).</summary>
+    [DllImport("user32.dll", EntryPoint = "SetMenu")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetWindowMenu(IntPtr hWnd, IntPtr menu);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyMenu(IntPtr menu);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DrawMenuBar(IntPtr hWnd);
+
     /// <summary>Po udanym wywołaniu system przejmuje uchwyt regionu.</summary>
     [DllImport("user32.dll")]
     public static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, [MarshalAs(UnmanagedType.Bool)] bool redraw);

@@ -28,6 +28,14 @@ enum WindowControl {
         }
     }
 
+    /// Maksymalizacja lub zmiana rozmiaru ramką okna Windows (rozmiar w punktach).
+    static func resize(windowID: UInt32, pid: Int32, frame: CGRect?, to size: CGSize) {
+        guard let window = element(windowID: windowID, pid: pid, frame: frame) else { return }
+        var size = size
+        guard let value = AXValueCreate(.cgSize, &size) else { return }
+        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+    }
+
     /// Ikona aplikacji 64×64 w PNG – Windows pokazuje ją na pasku zadań i w Alt+Tab.
     static func iconPNG(pid: Int32) -> Data? {
         guard let icon = NSRunningApplication(processIdentifier: pid)?.icon else { return nil }

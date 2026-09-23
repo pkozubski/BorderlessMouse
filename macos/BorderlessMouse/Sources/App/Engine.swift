@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -68,6 +69,9 @@ final class Engine {
     /// Tryb okien: ostatnia lista (do podnoszenia i zamykania okien z Windowsa).
     private var trackedWindows: [UInt32: TrackedWindow] = [:]
     private var sentIcons: Set<Int32> = []
+    /// Menu aplikacji wysłane do Windowsa – pozycje do wywołania po numerze.
+    private var menus: [Int32: [AXUIElement]] = [:]
+    private let menuQueue = DispatchQueue(label: "blm.display.menus", qos: .userInitiated)
 
     init(config: Config) {
         self.config = config
@@ -361,6 +365,23 @@ final class Engine {
         case .windowClose:
             guard let id = r.u32(), let window = trackedWindows[id] else { return }
             DispatchQueue.main.async { WindowControl.close(windowID: id, pid: window.pid, frame: window.frame) }
+        case .windowResize:
+            guard let id = r.u32(), let width = r.u16(), let height = r.u16(), width > 0, height > 0,
+                  let window = trackedWindows[id], let displayID else { return }
+            let scale = WindowTracker.pixelScale(of: displayID)
+            let size = CGSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
+            DispatchQueue.main.async { WindowControl.resize(windowID: id, pid: window.pid, frame: window.frame, to: size) }
+        case .menuRequest:
+            guard let raw = r.u32(), displayMode == .windows else { return }
+            sendMenu(pid: Int32(bitPattern: raw))
+        case .menuInvoke:
+            guard let raw = r.u32(), let index = r.u16() else { return }
+            let pid = Int32(bitPattern: raw)
+            guard let item = menus[pid]?[safe: Int(index)] else { return }
+            DispatchQueue.main.async {
+                NSRunningApplication(processIdentifier: pid)?.activate()
+                MenuReader.invoke(item)
+            }
         case .displayMode:
             guard let raw = r.u8(), let mode = DisplayMode(rawValue: raw) else { return }
             applyDisplayMode(mode)
@@ -477,8 +498,8 @@ final class Engine {
 
     /// Kolejka trackera: strumienie okien, lista dla Windowsa i ikony nowych aplikacji.
     private func windowsChanged(_ tracked: [TrackedWindow], displayID: CGDirectDisplayID) {
-        // Pusty ekran wirtualny = nic nie nagrywamy (sam pasek menu nie jest potrzebny).
-        let windows = tracked.contains { !$0.isMenuBar } ? tracked : []
+        // Pasek menu Maca nie trafia na Windows – menu aplikacji jest w nagłówku jej okien.
+        let windows = tracked.filter { !$0.isMenuBar }
         display.updateWindows(windows)
         let descriptors = windows.map { WindowTracker.descriptor($0, on: displayID) }
         let mode = CGDisplayCopyDisplayMode(displayID)
@@ -486,13 +507,27 @@ final class Engine {
                                          displayHeight: mode?.pixelHeight ?? 0))
         eventsQueue.async {
             self.trackedWindows = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            let newApps = Set(windows.filter { !$0.isMenuBar }.map(\.pid)).subtracting(self.sentIcons)
+            let newApps = Set(windows.map(\.pid)).subtracting(self.sentIcons)
             guard !newApps.isEmpty else { return }
             self.sentIcons.formUnion(newApps)
+            newApps.forEach(self.sendMenu)
             DispatchQueue.main.async {
                 for pid in newApps {
                     if let png = WindowControl.iconPNG(pid: pid) { self.server.send(Frame.windowIcon(pid: pid, png: png)) }
                 }
+            }
+        }
+    }
+
+    /// Odczyt menu trwa (Accessibility pyta aplikację), więc poza eventsQueue.
+    private func sendMenu(pid: Int32) {
+        let swap = config.swapCtrlCmd
+        menuQueue.async { [weak self] in
+            guard let self, let snapshot = MenuReader.read(pid: pid, swapCtrlCmd: swap) else { return }
+            self.eventsQueue.async {
+                guard self.displayMode == .windows, self.displayRunning == true else { return }
+                self.menus[pid] = snapshot.items
+                self.server.send(Frame.windowMenu(pid: pid, payload: snapshot.payload))
             }
         }
     }
@@ -506,6 +541,7 @@ final class Engine {
         windowTracker.stop()
         trackedWindows = [:]
         sentIcons = []
+        menus = [:]
         injector.handsOffDroppedWindows = false
         injector.windowLeave(keepKeyboard: false)
         injector.virtualDisplayID = nil
@@ -618,4 +654,8 @@ final class Engine {
         t.resume()
         statsTimer = t
     }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }

@@ -294,6 +294,12 @@ internal static class Program
         Expect(Frame.ParseWindowIcon(Hex("4d0000008950")) is { pid: 77 } icon && icon.png.SequenceEqual(new byte[] { 0x89, 0x50 }), "WINDOW_ICON");
         Expect(Frame.WindowRaise(0x01020304).SequenceEqual(Hex("350404030201")) && Frame.WindowClose(7).SequenceEqual(Hex("360407000000"))
                && Frame.DisplayKeyframe(0x01020304).SequenceEqual(Hex("830404030201")), "window commands");
+        Expect(Frame.WindowResize(7, 1280, 720).SequenceEqual(Hex("37080700000000" + "05d002")) && Frame.MenuRequest(77).SequenceEqual(Hex("39044d000000"))
+               && Frame.MenuInvoke(77, 3).SequenceEqual(Hex("38064d0000000300")), "resize and menu commands");
+        var menu = Frame.ParseWindowMenu(Hex("4d00000001000904506c696b00020001044e6f7779064374726c2b4e020000"));
+        Expect(menu is { pid: 77, items: [{ Index: 0, Title: "Plik", Enabled: true, Children: [{ Index: 1, Title: "Nowy", Shortcut: "Ctrl+N" }, { Index: 2, Separator: true }] }] },
+            "WINDOW_MENU tree from the Mac layout");
+        Expect(Frame.ParseWindowMenu(Hex("4d00000001000904506c696b00020001044e6f7779064374726c2b4e0200")) is null, "truncated WINDOW_MENU rejected");
         Expect(Frame.ParseWindowHandoff(Hex("3412ffff")) == (0x1234, 0xFFFF), "WINDOW_HANDOFF from the Mac layout");
         Expect(Frame.DisplayStop().SequenceEqual(Hex("8100")) && Frame.DisplayKeyframe().SequenceEqual(Hex("8300")), "display control frames");
 

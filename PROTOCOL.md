@@ -65,6 +65,9 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x34 | WINDOW_HANDOFF | M → W | `u16 x`, `u16 y` – okno upuszczone na ekranie wirtualnym, Windows przejmuje kursor |
 | 0x35 | WINDOW_RAISE | W → M | `u32 windowID` – okno aktywowane na Windowsie, Mac wyciąga je na wierzch |
 | 0x36 | WINDOW_CLOSE | W → M | `u32 windowID` – Alt+F4 / zamknięcie z paska zadań |
+| 0x37 | WINDOW_RESIZE | W → M | `u32 windowID`, `u16 w`, `u16 h` – maksymalizacja lub zmiana rozmiaru ramką Windows (piksele ekranu wirtualnego) |
+| 0x38 | MENU_INVOKE | W → M | `i32 pid`, `u16 index` – wybrano pozycję menu aplikacji |
+| 0x39 | MENU_REQUEST | W → M | `i32 pid` – prośba o aktualne menu (aktywacja okna, otwarcie menu) |
 | 0x40 | AUDIO_START | W → M | `u16 udpPort`, `u8 format` |
 | 0x41 | AUDIO_STOP | W → M | – |
 | 0x42 | AUDIO_FORMAT | M → W | `u32 rate`, `u8 channels`, `u8 format`, `u8 status`, komunikat |
@@ -80,6 +83,7 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x85 | DISPLAY_MODE | W → M | `u8 mode` |
 | 0x86 | DISPLAY_WINDOWS | M → W | `u16 displayWidth`, `u16 displayHeight`, `u8 count`, `count ×` (`u32 id`, `i32 pid`, `i32 x`, `i32 y`, `u16 w`, `u16 h`, `u8 flags`, `u8 titleLength`, tytuł UTF-8); piksele ekranu wirtualnego, od najwyższego; flagi: bit 0 pasek menu, bit 1 menu/podpowiedź |
 | 0x87 | WINDOW_ICON | M → W | `i32 pid`, PNG 64×64 – ikona aplikacji na pasek zadań |
+| 0x88 | WINDOW_MENU | M → W | `i32 pid`, lista pozycji: `u16 count`, dla każdej `u8 flags` (bit 0 aktywna, 1 separator, 2 zaznaczona, 3 podmenu), `u8 len` + tytuł, `u8 len` + skrót, przy podmenu zagnieżdżona lista; pozycje numerowane w kolejności przeglądania od 0 |
 
 Flagi `STATUS`: bit 0 Dostępność, bit 1 przechwytywanie audio, bit 2 kursor na Macu,
 bit 3 Mac obsługuje ekran wirtualny, bit 4 ekran wirtualny włączony na Macu,
@@ -167,7 +171,12 @@ pojawia się przy tej samej krawędzi monitora.
 ### Tryb okien
 
 W trybie okien (`mode = 1`) każde okno Maca leżące na ekranie wirtualnym ma na Windowsie
-własne okno systemowe (pasek zadań, Alt+Tab, minimalizacja, kolejność okien). Mac nagrywa
+własne okno systemowe: ramkę z paskiem tytułu i przyciskami minimalizacji, maksymalizacji
+i zamknięcia, menu aplikacji Maca w nagłówku (`WINDOW_MENU` / `MENU_INVOKE`), pasek zadań,
+Alt+Tab i zwykłą kolejność okien. Pasek menu Maca nie jest przesyłany. Okno Windows ma własne
+położenie (można je przenieść na inny monitor); kursor jest przeliczany względem obszaru
+klienta tego okna na odpowiadające mu okno Maca. Przesunięcie okna na Macu przesuwa okno
+Windows o tyle samo, a zmiana rozmiaru ramką lub maksymalizacja wysyła `WINDOW_RESIZE`. Mac nagrywa
 każde okno osobno (ScreenCaptureKit, niezależnie od położenia i okien nad nim) i wysyła je
 jako osobne strumienie `kind = 2`; listę okien (`DISPLAY_WINDOWS`) do ~30 razy na sekundę.
 

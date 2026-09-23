@@ -41,6 +41,9 @@ enum MessageType: UInt8 {
     case windowHandoff = 0x34
     case windowRaise = 0x35
     case windowClose = 0x36
+    case windowResize = 0x37
+    case menuInvoke = 0x38
+    case menuRequest = 0x39
     case audioStart = 0x40
     case audioStop = 0x41
     case audioFormat = 0x42
@@ -56,6 +59,7 @@ enum MessageType: UInt8 {
     case displayMode = 0x85
     case displayWindows = 0x86
     case windowIcon = 0x87
+    case windowMenu = 0x88
 }
 
 /// Tryb ekranu wirtualnego po stronie Windows.
@@ -383,6 +387,14 @@ enum Frame {
             w.raw(title)
         }
         return make(.displayWindows, w.bytes)
+    }
+
+    /// Menu aplikacji dla nagłówka okna Windows (format w MenuReader).
+    static func windowMenu(pid: Int32, payload: [UInt8]) -> Data {
+        var w = ByteWriter()
+        w.u32(UInt32(bitPattern: pid))
+        w.raw(payload)
+        return make(.windowMenu, w.bytes)
     }
 
     /// Ikona aplikacji (PNG) dla okien na pasku zadań Windows.

@@ -18,8 +18,10 @@
 - Windows: "Mac display" card with a toggle, "show it whenever you control the Mac" option,
   status, throughput and restart.
 - **Window mode** (default): every Mac window dragged onto the virtual display becomes a real
-  Windows window — taskbar button with the Mac app icon, Alt+Tab, minimize, normal z-order,
-  Alt+F4 closes it on the Mac. Each window is captured independently (ScreenCaptureKit) and
+  Windows window — native frame with minimize/maximize/close, the Mac app's menu (read through
+  Accessibility, with shortcuts and disabled/checked states) in the window header instead of the
+  Mac menu bar, resizing and maximizing that resize the Mac window, taskbar button with the Mac
+  app icon, Alt+Tab, normal z-order, closing closes it on the Mac. Each window is captured independently (ScreenCaptureKit) and
   streamed separately, so moving it never reveals the wallpaper and corners are rounded like on
   macOS. The real Windows pointer drives it (absolute positions, clicks also activate the
   Windows window), the keyboard follows the active window with Windows shortcuts kept local,

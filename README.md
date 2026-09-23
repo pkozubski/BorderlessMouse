@@ -212,16 +212,20 @@ Jak z tego korzystać:
 **Tryb okien** (domyślny, przełącznik „Tylko okna Maca” na Windowsie): każde okno Maca,
 które przeciągniesz na ekran wirtualny, staje się zwykłym oknem Windows.
 
+* Ma ramkę Windows z paskiem tytułu i przyciskami minimalizacji, maksymalizacji i zamknięcia,
+  a pod nim menu aplikacji Maca (Plik, Edycja, Widok…) ze skrótami i wyszarzeniami.
+  Wybranie pozycji wywołuje ją na Macu. Pasek menu Maca nie jest potrzebny.
+* Zmiana rozmiaru ramką i maksymalizacja zmieniają rozmiar okna na Macu. Okno można
+  przesunąć za pasek tytułu Windows, także na inny monitor.
 * Ma przycisk na pasku zadań (z ikoną aplikacji Maca), jest w Alt+Tab, da się je
-  zminimalizować i schować za innymi oknami. Alt+F4 zamyka je na Macu.
-* Obraz każdego okna jest nagrywany osobno, więc przesuwanie nie odsłania tapety,
-  a narożniki są zaokrąglone jak na Macu.
+  zminimalizować i schować za innymi oknami. Zamknięcie zamyka je na Macu.
+* Obraz każdego okna jest nagrywany osobno, więc przesuwanie nie odsłania tapety.
 * Nad oknem Maca działa zwykły kursor Windows (bez opóźnienia obrazu). Kliknięcia
   i przewijanie trafiają do Maca.
 * Klawiatura pisze w oknie Maca, gdy jest ono aktywne, jak w każdej aplikacji Windows.
-  Klawisz Win, Alt+Tab i Alt+F4 zawsze działają w Windowsie. Gdy aktywne jest okno Maca,
-  u góry monitora widać też pasek menu Maca.
-* Okno wraca na MacBooka, gdy przeciągniesz je przez krawędź monitora po stronie Maca.
+  Klawisz Win, Alt+Tab i Alt+F4 zawsze działają w Windowsie.
+* Okno wraca na MacBooka, gdy przeciągniesz je (za jego własny pasek tytułu) przez krawędź
+  monitora po stronie Maca.
 * Okna, które macOS przywróciłby na ekran wirtualny z poprzedniej sesji, wracają na MacBooka,
   więc na Windowsie pojawia się tylko to, co przeniesiesz.
 * Mac nagrywa wyłącznie przeniesione okna. Dopóki żadnego nie przeniesiesz – albo gdy Windows

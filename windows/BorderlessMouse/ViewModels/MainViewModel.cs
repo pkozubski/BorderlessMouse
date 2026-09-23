@@ -579,6 +579,9 @@ public partial class MainViewModel : ObservableObject
             case MessageType.DisplayWindows:
                 if (_displayRunning && _windowModeActive && Frame.ParseDisplayWindows(payload) is { } windows) ApplyMacWindows(windows);
                 break;
+            case MessageType.WindowMenu:
+                if (_displayRunning && _windowModeActive && Frame.ParseWindowMenu(payload) is { } menu) _viewer?.SetMenu(menu.pid, menu.items);
+                break;
             case MessageType.WindowIcon:
                 if (_displayRunning && Frame.ParseWindowIcon(payload) is { } icon) _viewer?.SetIcon(icon.pid, icon.png);
                 break;
@@ -709,7 +712,17 @@ public partial class MainViewModel : ObservableObject
                 var proxies = _viewer?.Proxies;
                 if (proxies is null || proxies.Count == 0) return null;
                 var root = DisplayNative.GetAncestor(DisplayNative.WindowFromPoint(point), DisplayNative.GA_ROOT);
-                return proxies.TryGetValue(root, out var proxy) ? proxy.Id : null;
+                if (!proxies.TryGetValue(root, out var proxy)) return null;
+                var c = proxy.Client;
+                if (point.X < c.Left || point.X >= c.Right || point.Y < c.Top || point.Y >= c.Bottom) return null;
+                var (x, y) = MapToMac(proxy, point);
+                return (proxy.Id, x, y);
+            };
+            _capture.MapToMacWindow = (id, point) =>
+            {
+                foreach (var proxy in _viewer?.Proxies.Values ?? Enumerable.Empty<DisplayViewer.ProxyInfo>())
+                    if (proxy.Id == id) return MapToMac(proxy, point);
+                return null;
             };
             _capture.MacWindowIsForeground = () =>
                 _viewer?.Proxies.TryGetValue(NativeMethods.GetForegroundWindow(), out var proxy) == true && !proxy.Popup;
@@ -961,6 +974,9 @@ public partial class MainViewModel : ObservableObject
         };
         viewer.WindowActivated += (id, active) => Post(() => OnMacWindowActivated(id, active));
         viewer.CloseRequested += id => { if (_client.IsConnected) _client.Send(Frame.WindowClose(id)); };
+        viewer.ResizeRequested += (id, width, height) => Post(() => OnMacWindowResized(id, width, height));
+        viewer.MenuInvoked += (pid, index) => { if (_client.IsConnected) _client.Send(Frame.MenuInvoke(pid, index)); };
+        viewer.MenuOpening += pid => Post(() => RequestMenu(pid));
         return viewer;
     }
 
@@ -1021,12 +1037,43 @@ public partial class MainViewModel : ObservableObject
         var m = _displayMonitor;
         int ScaleX(int x) => m.Left + (int)((long)x * m.Width / list.DisplayWidth);
         int ScaleY(int y) => m.Top + (int)((long)y * m.Height / list.DisplayHeight);
-        // Pasek menu Maca zasłoniłby górę pulpitu Windows – tylko gdy aktywne jest okno Maca.
-        var windows = list.Windows.Where(w => !w.IsMenuBar || _macWindowActive).Select(w => new DisplayViewer.ProxyWindow(
+        var windows = list.Windows.Where(w => !w.IsMenuBar).Select(w => new DisplayViewer.ProxyWindow(
             w.Id, w.Pid,
             new NativeMethods.RECT { Left = ScaleX(w.X), Top = ScaleY(w.Y), Right = ScaleX(w.X + w.Width), Bottom = ScaleY(w.Y + w.Height) },
-            w.IsPopup || w.IsMenuBar, w.Title)).ToList();
+            new NativeMethods.RECT { Left = w.X, Top = w.Y, Right = w.X + w.Width, Bottom = w.Y + w.Height },
+            list.DisplayWidth, list.DisplayHeight, w.IsPopup, w.Title)).ToList();
         _viewer?.UpdateWindows(windows);
+    }
+
+    /// <summary>Punkt w oknie Windows → ten sam punkt okna Maca na ekranie wirtualnym (0…65535).</summary>
+    private static (ushort x, ushort y) MapToMac(DisplayViewer.ProxyInfo proxy, NativeMethods.POINT point)
+    {
+        var c = proxy.Client;
+        var mac = proxy.MacPixels;
+        var px = mac.Left + (double)(point.X - c.Left) * mac.Width / Math.Max(1, c.Width);
+        var py = mac.Top + (double)(point.Y - c.Top) * mac.Height / Math.Max(1, c.Height);
+        static ushort Normalize(double value, int size) => (ushort)Math.Clamp(value * 65535 / Math.Max(1, size - 1), 0, 65535);
+        return (Normalize(px, proxy.DisplayWidth), Normalize(py, proxy.DisplayHeight));
+    }
+
+    /// <summary>Ramka Windows zmieniła rozmiar okna – Mac dopasowuje okno (piksele ekranu wirtualnego).</summary>
+    private void OnMacWindowResized(uint id, int width, int height)
+    {
+        if (!_windowModeActive || !_client.IsConnected || _macWindows is not { } list) return;
+        var m = _displayMonitor;
+        _client.Send(Frame.WindowResize(id, (int)((long)width * list.DisplayWidth / Math.Max(1, m.Width)),
+            (int)((long)height * list.DisplayHeight / Math.Max(1, m.Height))));
+    }
+
+    private readonly Dictionary<int, long> _menuRequests = new();
+
+    /// <summary>Świeże menu (wyszarzenia, zaznaczenia) przy aktywacji okna i otwieraniu menu.</summary>
+    private void RequestMenu(int pid)
+    {
+        var now = Environment.TickCount64;
+        if (_menuRequests.TryGetValue(pid, out var last) && now - last < 1500) return;
+        _menuRequests[pid] = now;
+        if (_client.IsConnected) _client.Send(Frame.MenuRequest(pid));
     }
 
     private void OnMacWindowActivated(uint id, bool active)
@@ -1036,15 +1083,14 @@ public partial class MainViewModel : ObservableObject
         {
             _client.Send(Frame.WindowRaise(id));
             _capture?.NoteRaised(id);
+            if (_viewer?.Proxies.Values.FirstOrDefault(p => p.Id == id) is { Pid: > 0 } proxy) RequestMenu(proxy.Pid);
         }
         else
         {
             // Klawisze wciśnięte w chwili przełączenia (np. Alt przy Alt+Tab) nie mogą zostać na Macu.
             _client.SendReleaseAll();
         }
-        if (_macWindowActive == active) return;
         _macWindowActive = active;
-        if (_macWindows is { } list) ApplyMacWindows(list);
     }
 
     /// <summary>0…65535 na ekranie wirtualnym → piksele ekranu Windows (obraz wypełnia monitor).</summary>
