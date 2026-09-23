@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -177,8 +178,19 @@ public static class VirtualDisplayDriver
         var log = Path.Combine(Path.GetTempPath(), "BorderlessMouse-vdd-install.log");
         try { File.Delete(log); } catch (IOException) { }
         var user = WindowsIdentity.GetCurrent().User?.Value ?? "";
-        var script = InstallScript(log, user);
-        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        // Parametry uruchomienia przez UAC są obcinane, więc skrypt idzie przez plik. Krótki
+        // starter w linii poleceń sprawdza jego SHA-256 – podmiana pliku przed zgodą nic nie da.
+        var scriptBytes = new UTF8Encoding(false).GetBytes(InstallScript(log, user));
+        var folder = Path.Combine(Path.GetTempPath(), "BorderlessMouse-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var scriptPath = Path.Combine(folder, "vdd-install.ps1");
+        await File.WriteAllBytesAsync(scriptPath, scriptBytes);
+        var hash = Convert.ToHexString(SHA256.HashData(scriptBytes));
+        var bootstrap = $"$b=[IO.File]::ReadAllBytes('{scriptPath.Replace("'", "''")}');"
+                        + "$h=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($b)).Replace('-','');"
+                        + $"if($h -ne '{hash}'){{exit 3}};"
+                        + "Invoke-Expression ([Text.Encoding]::UTF8.GetString($b))";
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(bootstrap));
         var info = new ProcessStartInfo("powershell.exe",
             $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded}")
         {
@@ -199,10 +211,19 @@ public static class VirtualDisplayDriver
         if (process is null) throw new InvalidOperationException(T("Nie udało się uruchomić instalatora.", "Could not start the installer."));
         using (process)
         {
-            await process.WaitForExitAsync();
+            try
+            {
+                await process.WaitForExitAsync();
+            }
+            finally
+            {
+                try { Directory.Delete(folder, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
             if (process.ExitCode != 0)
             {
                 var details = File.Exists(log) ? File.ReadAllText(log).Trim() : "";
+                if (details.Length == 0 && process.ExitCode == 3)
+                    details = T("plik instalatora został zmieniony przed uruchomieniem.", "the installer file was modified before it ran.");
                 throw new InvalidOperationException(T("Instalacja sterownika nie powiodła się", "Driver installation failed")
                     + (details.Length > 0 ? ": " + details : $" (kod {process.ExitCode})."));
             }
@@ -284,7 +305,7 @@ public static class VirtualDisplayDriver
                 if ($process.ExitCode -ne 0) { throw "nefcon zakończył się kodem $($process.ExitCode)" }
                 exit 0
             } catch {
-                try { Set-Content -Path $log -Value $_.Exception.Message -Encoding UTF8 } catch { }
+                try { Set-Content -Path $log -Value ($_.Exception.Message + ' ' + $_.InvocationInfo.PositionMessage) -Encoding UTF8 } catch { }
                 exit 1
             } finally {
                 Remove-Item -Recurse -Force -Path $work -ErrorAction SilentlyContinue
