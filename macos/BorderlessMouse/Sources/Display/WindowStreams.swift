@@ -91,8 +91,6 @@ final class WindowStreams {
         private var awaitingKeyframe = true
         private var lastPixelBuffer: CVPixelBuffer?
         private var cornerRadius: UInt16 = 0
-        /// Duża wartość = promień zmierzymy na pierwszej klatce.
-        private var framesSinceRadius = 1_000
         private var stopped = false
         private(set) var dropped: UInt64 = 0
 
@@ -123,6 +121,7 @@ final class WindowStreams {
                 do {
                     try await capture.start(windowID: isMenuBar ? nil : id, displayID: displayID, menuBarRect: frame,
                                             width: Self.encodedSize(width), height: Self.encodedSize(height))
+                    self?.measureRadius(width: Self.encodedSize(width), height: Self.encodedSize(height))
                 } catch {
                     NSLog("BorderlessMouse: nie można nagrać okna \(id): \(error.localizedDescription)")
                     self?.stop()
@@ -166,8 +165,8 @@ final class WindowStreams {
             let old = encoder
             encoder = replacement
             awaitingKeyframe = true
-            framesSinceRadius = 1_000
             lock.unlock()
+            measureRadius(width: Self.encodedSize(width), height: Self.encodedSize(height))
             old?.onFrame = nil
             old?.invalidate()
             let capture = self.capture
@@ -196,18 +195,22 @@ final class WindowStreams {
                 return
             }
             lastPixelBuffer = buffer
-            framesSinceRadius += 1
-            let measure = framesSinceRadius > 30 && !isMenuBar
-            if measure { framesSinceRadius = 0 }
             lock.unlock()
-            if measure {
-                let radius = Self.cornerRadius(of: buffer)
-                lock.lock()
-                cornerRadius = radius
-                lock.unlock()
-            }
             guard hasClient() else { return }
             encoder.encode(buffer, presentationTime: time)
+        }
+
+        /// Promień z osobnego zrzutu – w strumieniu narożniki są już wypełnione kolorem.
+        private func measureRadius(width: Int, height: Int) {
+            guard !isMenuBar, let capture else { return }
+            let id = self.id
+            Task { [weak self] in
+                let radius = await capture.measureCornerRadius(windowID: id, width: width, height: height)
+                guard let self else { return }
+                self.lock.lock()
+                self.cornerRadius = radius
+                self.lock.unlock()
+            }
         }
 
         private func wire(_ encoder: VideoEncoder) {
@@ -327,8 +330,30 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         stream?.stopCapture { _ in }
     }
 
+    /// Kolor paska menu okna na Windowsie. Przezroczyste narożniki okna Maca dostają ten
+    /// kolor (H.264 nie ma kanału alfa), więc styk paska z oknem jest niewidoczny.
+    static let headerColor = CGColor(srgbRed: 41 / 255, green: 41 / 255, blue: 43 / 255, alpha: 1)
+
+    /// Promień narożnika okna z jednego zrzutu z kanałem alfa (strumień ma narożniki wypełnione).
+    func measureCornerRadius(windowID: UInt32, width: Int, height: Int) async -> UInt16 {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+              let window = content.windows.first(where: { $0.windowID == windowID }) else { return 0 }
+        let config = SCStreamConfiguration()
+        config.width = width
+        config.height = height
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.showsCursor = false
+        config.scalesToFit = false
+        if #available(macOS 14.0, *) { config.ignoreShadowsSingleWindow = true }
+        guard let sample = try? await SCScreenshotManager.captureSampleBuffer(contentFilter: SCContentFilter(desktopIndependentWindow: window),
+                                                                               configuration: config),
+              let buffer = sample.imageBuffer else { return 0 }
+        return WindowStreams.measureCornerRadius(buffer)
+    }
+
     private func configuration(menuBarRect: CGRect?, width: Int, height: Int) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
+        config.backgroundColor = Self.headerColor
         config.width = width
         config.height = height
         config.pixelFormat = kCVPixelFormatType_32BGRA

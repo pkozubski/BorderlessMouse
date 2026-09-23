@@ -73,6 +73,8 @@ final class WindowTracker {
             // Okno musi leżeć głównie na ekranie wirtualnym – przeciągane z MacBooka dostaje
             // własne okno Windows dopiero, gdy jego środek przejdzie na ekran wirtualny.
             if !isMenuBar, !display.contains(CGPoint(x: bounds.midX, y: bounds.midY)) { continue }
+            // Malutkie okna pomocnicze aplikacji (np. VS Code) nie są czymś, czym da się pracować.
+            if layer == 0, bounds.width < 60 || bounds.height < 40 { continue }
             windows.append(TrackedWindow(id: isMenuBar ? WindowDescriptor.menuBarStreamID : UInt32(number),
                                          pid: pid, frame: isMenuBar ? visible : bounds,
                                          isMenuBar: isMenuBar, isPopup: layer != 0 && !isMenuBar,

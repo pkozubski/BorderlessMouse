@@ -74,7 +74,9 @@ enum DisplaySelfTest {
                 let result = captureWindow(window, width: size.width, height: size.height)
                 check(result.frames > 0, "okno „\(window.title)” \(size.width)×\(size.height): \(result.frames) klatek, zakodowano \(result.encoded)")
                 check(result.encoded > 0, "koder okna zwrócił klatki")
-                print("  promień narożnika okna: \(result.radius) px")
+                let corner = (red: Int(result.radius >> 8), green: Int(result.radius & 0xFF))
+                check(abs(corner.red - 41) < 12 && abs(corner.green - 41) < 12,
+                      "narożnik okna wypełniony kolorem paska (R \(corner.red), G \(corner.green))")
                 // Cały potok trybu okien: WindowStreams → ramki z identyfikatorem okna i promieniem.
                 let lock = NSLock()
                 var frames: [VideoStream.Frame] = []
@@ -172,8 +174,12 @@ enum DisplaySelfTest {
             let first = frames == 1
             lock.unlock()
             if first {
-                let r = WindowStreams.measureCornerRadius(buffer)
-                lock.lock(); radius = r; lock.unlock()
+                // Narożnik ma być wypełniony kolorem paska (41, 41, 43), a nie czarny.
+                CVPixelBufferLockBaseAddress(buffer, .readOnly)
+                if let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) {
+                    lock.lock(); radius = UInt16(base[2]) << 8 | UInt16(base[1]); lock.unlock() // R, G lewego górnego piksela
+                }
+                CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
                 encoder.requestKeyframe()
             }
             encoder.encode(buffer, presentationTime: time)

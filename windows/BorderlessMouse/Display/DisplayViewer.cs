@@ -18,9 +18,10 @@ namespace BorderlessMouse.Display;
 /// Obraz z Maca na Windowsie. Dwa tryby:
 /// <list type="bullet">
 /// <item>pełny pulpit – jedno okno na cały monitor ze strumieniem całego ekranu wirtualnego;</item>
-/// <item>tryb okien – każde okno Maca jest zwykłym oknem Windows: pasek tytułu z przyciskami
-/// minimalizacji, maksymalizacji i zamknięcia, menu aplikacji Maca w nagłówku, zmiana rozmiaru
-/// ramką, pasek zadań i Alt+Tab. Każde ma osobny strumień i dekoder.</item>
+/// <item>tryb okien – każde okno Maca jest oknem Windows w stylu macOS: zaokrąglone rogi,
+/// własny pasek tytułu Maca (w obrazie) i nad nim ciemny pasek menu aplikacji. Okno jest na
+/// pasku zadań i w Alt+Tab, da się je zminimalizować, przeciągnąć za pasek menu
+/// i zmaksymalizować podwójnym kliknięciem. Każde ma osobny strumień i dekoder.</item>
 /// </list>
 /// Dekodowanie (Media Foundation), konwersja NV12 → RGB (procesor wideo D3D11)
 /// i wyświetlanie (łańcuchy wymiany DXGI) działają na jednym wątku z pętlą komunikatów.
@@ -37,36 +38,53 @@ public sealed class DisplayViewer : IDisposable
 
     /// <summary>
     /// Okno Windows reprezentujące okno Maca (do przeliczania kursora w hookach):
-    /// obszar klienta na ekranie Windows i odpowiadające mu okno na ekranie wirtualnym.
+    /// obszar obrazu na ekranie Windows i odpowiadające mu okno na ekranie wirtualnym.
     /// </summary>
     public readonly record struct ProxyInfo(uint Id, int Pid, bool Popup, RECT Client, RECT MacPixels, int DisplayWidth, int DisplayHeight);
 
     private const string ClassName = "BorderlessMouseDisplay";
+    private const string HeaderClassName = "BorderlessMouseMenuBar";
     private const uint FullscreenId = 0;
     /// <summary>Tyle klatek w kolejce oznacza, że dekoder nie nadąża – odrzucamy i prosimy o klatki kluczowe.</summary>
     private const int MaxQueuedFrames = 48;
+    /// <summary>Wysokość paska menu przy 100% (jak pasek menu macOS).</summary>
+    private const int HeaderHeight96 = 28;
     private const uint WM_MOVE = 0x0003;
     private const uint WM_SIZE = 0x0005;
     private const uint WM_ACTIVATE = 0x0006;
+    private const uint WM_PAINT = 0x000F;
     private const uint WM_ERASEBKGND = 0x0014;
     private const uint WM_SETICON = 0x0080;
-    private const uint WM_COMMAND = 0x0111;
+    private const uint WM_NCLBUTTONDOWN = 0x00A1;
     private const uint WM_SYSCOMMAND = 0x0112;
-    private const uint WM_INITMENU = 0x0116;
+    private const uint WM_MOUSEMOVE = 0x0200;
+    private const uint WM_LBUTTONDOWN = 0x0201;
+    private const uint WM_LBUTTONDBLCLK = 0x0203;
+    private const uint WM_MOUSELEAVE = 0x02A3;
     private const uint WM_ENTERSIZEMOVE = 0x0231;
     private const uint WM_EXITSIZEMOVE = 0x0232;
     private const long SC_KEYMENU = 0xF100;
-    private const long SIZE_RESTORED = 0;
     private const long SIZE_MINIMIZED = 1;
-    private const long SIZE_MAXIMIZED = 2;
-    private const uint WS_OVERLAPPEDWINDOW = 0x00CF0000;
+    private const int HTCAPTION = 2;
+    private const uint WS_CHILD = 0x40000000;
+    private const uint WS_VISIBLE = 0x10000000;
+    private const uint WS_CLIPCHILDREN = 0x02000000;
+    private const uint WS_SYSMENU = 0x00080000;
+    private const uint WS_MINIMIZEBOX = 0x00020000;
     private const uint WS_EX_APPWINDOW = 0x00040000;
     private const uint SWP_NOZORDER = 0x0004;
+    private const uint CS_DBLCLKS = 0x0008;
+
+    private static readonly uint HeaderBackground = Rgb(41, 41, 43);   // jak kolor narożników z Maca
+    private static readonly uint HeaderHover = Rgb(72, 72, 76);
+    private static readonly uint HeaderText = Rgb(236, 236, 236);
+    private static readonly uint HeaderDisabled = Rgb(130, 130, 134);
 
     private readonly ConcurrentQueue<VideoStream.VideoFrame> _frames = new();
     private readonly ConcurrentQueue<Action> _commands = new();
     private readonly AutoResetEvent _wake = new(false);
     private readonly WndProcDelegate _wndProc;
+    private readonly WndProcDelegate _headerProc;
     private Thread? _thread;
     private volatile bool _running;
     private long _framesPresented;
@@ -93,13 +111,13 @@ public sealed class DisplayViewer : IDisposable
     public event Action<uint?>? KeyframeNeeded;
     /// <summary>Okno Maca aktywowane (true) albo dezaktywowane na Windowsie.</summary>
     public event Action<uint, bool>? WindowActivated;
-    /// <summary>Alt+F4, przycisk zamknięcia, zamknięcie z paska zadań.</summary>
+    /// <summary>Alt+F4, zamknięcie z paska zadań.</summary>
     public event Action<uint>? CloseRequested;
-    /// <summary>Użytkownik zmienił rozmiar ramką albo zmaksymalizował okno (rozmiar klienta w pikselach Windows).</summary>
+    /// <summary>Maksymalizacja lub przywrócenie – nowy rozmiar obrazu okna w pikselach Windows.</summary>
     public event Action<uint, int, int>? ResizeRequested;
     /// <summary>Wybrano pozycję menu aplikacji (pid, numer pozycji).</summary>
     public event Action<int, int>? MenuInvoked;
-    /// <summary>Menu okna jest otwierane – warto odświeżyć je z Maca (wyszarzenia, zaznaczenia).</summary>
+    /// <summary>Menu jest rozwijane – warto odświeżyć je z Maca (wyszarzenia, zaznaczenia).</summary>
     public event Action<int>? MenuOpening;
 
     public long FramesPresented => Interlocked.Read(ref _framesPresented);
@@ -111,6 +129,7 @@ public sealed class DisplayViewer : IDisposable
     public DisplayViewer()
     {
         _wndProc = WndProc;
+        _headerProc = HeaderProc;
     }
 
     public void Start(RECT monitor, bool windowMode)
@@ -120,7 +139,7 @@ public sealed class DisplayViewer : IDisposable
         _windowMode = windowMode;
         _running = true;
         _thread = new Thread(Run) { IsBackground = true, Name = "blm-display", Priority = ThreadPriority.AboveNormal };
-        _thread.SetApartmentState(ApartmentState.MTA);
+        _thread.SetApartmentState(ApartmentState.STA); // TrackPopupMenu i GDI
         _thread.Start();
     }
 
@@ -190,11 +209,12 @@ public sealed class DisplayViewer : IDisposable
         foreach (var surface in _surfaces.Values.Where(s => s.Pid == pid)) ApplyIcon(surface);
     });
 
-    /// <summary>Menu aplikacji Maca dla nagłówka jej okien.</summary>
+    /// <summary>Menu aplikacji Maca – pokazywane w pasku nad jej oknami.</summary>
     public void SetMenu(int pid, IReadOnlyList<MacMenuItem> items) => Post(() =>
     {
         _menus[pid] = items;
-        foreach (var surface in _surfaces.Values.Where(s => s.Pid == pid && s.Kind == SurfaceKind.Window)) ApplyMenu(surface);
+        foreach (var surface in _surfaces.Values.Where(s => s.Pid == pid && s.Header != IntPtr.Zero))
+            InvalidateRect(surface.Header, IntPtr.Zero, true);
     });
 
     private void Post(Action action)
@@ -209,7 +229,7 @@ public sealed class DisplayViewer : IDisposable
     {
         try
         {
-            RegisterWindowClass();
+            RegisterWindowClasses();
             CreateDevice();
             if (!_windowMode) CreateFullscreenSurface();
             PublishProxies();
@@ -255,7 +275,7 @@ public sealed class DisplayViewer : IDisposable
                 EnsureDecoder(surface, frame);
                 if (surface.Decoder is null) continue;
                 surface.AwaitingKeyframe = false;
-                if (frame.CornerRadius != surface.CornerRadius && surface.Kind == SurfaceKind.Popup)
+                if (frame.CornerRadius != surface.CornerRadius && surface.Kind != SurfaceKind.Fullscreen)
                 {
                     surface.CornerRadius = frame.CornerRadius;
                     ApplyShape(surface);
@@ -335,8 +355,8 @@ public sealed class DisplayViewer : IDisposable
             var height = surface.Height;
             var visibleWidth = Math.Min(frameWidth, (int)description.Width);
             var visibleHeight = Math.Min(frameHeight, (int)description.Height);
-            // Pełny pulpit: proporcje ekranu. Okno: obraz wypełnia obszar klienta (w trakcie
-            // zmiany rozmiaru skaluje się, zanim Mac dopasuje okno).
+            // Pełny pulpit: proporcje ekranu. Okno: obraz wypełnia obszar (przy zmianie
+            // rozmiaru skaluje się, zanim Mac dopasuje okno).
             var destination = surface.Kind == SurfaceKind.Fullscreen
                 ? Letterbox(visibleWidth, visibleHeight, width, height)
                 : new RawRect(0, 0, width, height);
@@ -448,21 +468,28 @@ public sealed class DisplayViewer : IDisposable
     {
         public uint Id;
         public SurfaceKind Kind;
+        /// <summary>Okno najwyższego poziomu (pasek zadań, Alt+Tab).</summary>
         public IntPtr Handle;
+        /// <summary>Okno potomne z obrazem (łańcuch wymiany). Dla menu i pełnego pulpitu = Handle.</summary>
+        public IntPtr Video;
+        /// <summary>Pasek menu w stylu macOS nad obrazem (tylko zwykłe okna).</summary>
+        public IntPtr Header;
+        public int HeaderHeight;
         public int Pid;
         public string Title = "";
         /// <summary>Okno Maca przeliczone na ekran Windows (z ostatniej listy).</summary>
         public RECT MacScreen;
         public RECT MacPixels;
         public int DisplayWidth, DisplayHeight;
-        /// <summary>Obszar klienta na ekranie Windows – tam jest obraz okna Maca.</summary>
+        /// <summary>Obszar obrazu na ekranie Windows.</summary>
         public RECT Client;
-        /// <summary>Rozmiar łańcucha wymiany = rozmiar obszaru klienta.</summary>
+        /// <summary>Rozmiar łańcucha wymiany = rozmiar obszaru obrazu.</summary>
         public int Width, Height;
         public bool InSizeMove;
         public bool Maximized;
-        public long LastResizeRequest;
-        public IntPtr Menu;
+        public RECT RestoreClient;
+        public int HoverItem = -1;
+        public List<(int left, int right)> ItemBounds = new();
         public ushort CornerRadius;
         public int ShapeWidth, ShapeHeight, ShapeRadius = -1;
         public bool AwaitingKeyframe = true;
@@ -487,16 +514,12 @@ public sealed class DisplayViewer : IDisposable
         if (handle == IntPtr.Zero) throw new InvalidOperationException($"CreateWindowEx failed: {Marshal.GetLastWin32Error()}");
         var surface = new Surface
         {
-            Id = FullscreenId, Kind = SurfaceKind.Fullscreen, Handle = handle, Client = _monitor,
+            Id = FullscreenId, Kind = SurfaceKind.Fullscreen, Handle = handle, Video = handle, Client = _monitor,
             Width = _monitor.Width, Height = _monitor.Height,
         };
         surface.SwapChain = CreateSwapChain(handle, surface.Width, surface.Height);
         Register(surface);
     }
-
-    private static uint StyleOf(SurfaceKind kind) => kind == SurfaceKind.Window ? WS_OVERLAPPEDWINDOW : WS_POPUP;
-    private static uint ExStyleOf(SurfaceKind kind) =>
-        kind == SurfaceKind.Window ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
 
     private void CreateWindowSurface(ProxyWindow window)
     {
@@ -508,17 +531,31 @@ public sealed class DisplayViewer : IDisposable
             DisplayWidth = window.DisplayWidth, DisplayHeight = window.DisplayHeight,
         };
         // Nowe okno powstaje tam, gdzie leży okno Maca; menu i podpowiedzi – przy swoim oknie.
-        surface.Client = kind == SurfaceKind.Popup ? PopupClient(surface) : window.MacScreen;
-        var frame = FrameFor(surface.Client, kind, hasMenu: false);
-        surface.Handle = CreateWindowExW(ExStyleOf(kind), ClassName, window.Title, StyleOf(kind), frame.Left, frame.Top,
-            Math.Max(1, frame.Width), Math.Max(1, frame.Height), IntPtr.Zero, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
-        if (surface.Handle == IntPtr.Zero) return;
-        surface.Width = Math.Max(1, surface.Client.Width);
-        surface.Height = Math.Max(1, surface.Client.Height);
-        surface.SwapChain = CreateSwapChain(surface.Handle, surface.Width, surface.Height);
+        var client = kind == SurfaceKind.Popup ? PopupClient(surface) : window.MacScreen;
+        var instance = GetModuleHandle(null);
+        if (kind == SurfaceKind.Window)
+        {
+            // Bez ramki Windows: pasek tytułu jest w obrazie okna Maca, a nad nim pasek menu.
+            surface.Handle = CreateWindowExW(WS_EX_APPWINDOW, ClassName, window.Title, WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
+                client.Left, client.Top, Math.Max(1, client.Width), Math.Max(1, client.Height), IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);
+            if (surface.Handle == IntPtr.Zero) return;
+            surface.HeaderHeight = HeaderHeight96 * (int)Math.Max(96, GetDpiForWindow(surface.Handle)) / 96;
+            surface.Header = CreateWindowExW(0, HeaderClassName, "", WS_CHILD | WS_VISIBLE, 0, 0, 1, surface.HeaderHeight,
+                surface.Handle, IntPtr.Zero, instance, IntPtr.Zero);
+            surface.Video = CreateWindowExW(0, ClassName, "", WS_CHILD | WS_VISIBLE, 0, surface.HeaderHeight, 1, 1,
+                surface.Handle, IntPtr.Zero, instance, IntPtr.Zero);
+        }
+        else
+        {
+            surface.Handle = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, ClassName, window.Title, WS_POPUP,
+                client.Left, client.Top, Math.Max(1, client.Width), Math.Max(1, client.Height), IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);
+            if (surface.Handle == IntPtr.Zero) return;
+            surface.Video = surface.Handle;
+        }
         Register(surface);
+        Place(surface, client);
+        surface.SwapChain = CreateSwapChain(surface.Video, surface.Width, surface.Height);
         ApplyIcon(surface);
-        ApplyMenu(surface);
         // Klatki mogły przyjść przed listą okien – prosimy o pełny obraz.
         RequestKeyframe(surface.Id);
     }
@@ -529,6 +566,7 @@ public sealed class DisplayViewer : IDisposable
         {
             surface.Title = window.Title;
             SetWindowTextW(surface.Handle, window.Title);
+            if (surface.Header != IntPtr.Zero) InvalidateRect(surface.Header, IntPtr.Zero, true);
         }
         var previous = surface.MacScreen;
         surface.MacScreen = window.MacScreen;
@@ -537,21 +575,24 @@ public sealed class DisplayViewer : IDisposable
         surface.DisplayHeight = window.DisplayHeight;
         if (surface.Kind == SurfaceKind.Popup)
         {
-            SetClient(surface, PopupClient(surface));
+            Place(surface, PopupClient(surface));
             return;
         }
         // Okno na Windowsie żyje własnym położeniem (można je przenieść nawet na inny monitor).
-        // Przesunięcie okna na Macu (np. za jego pasek tytułu) przesuwa je o tyle samo, a rozmiar
-        // idzie za oknem Maca – chyba że użytkownik właśnie je rozciąga albo jest zmaksymalizowane.
-        if (surface.InSizeMove || surface.Maximized || IsIconic(surface.Handle)) return;
+        // Przesunięcie okna na Macu (za jego pasek tytułu) przesuwa je o tyle samo, a rozmiar
+        // idzie za oknem Maca – chyba że użytkownik właśnie je przesuwa albo jest zmaksymalizowane.
+        if (surface.InSizeMove || surface.Maximized || IsIconic(surface.Handle))
+        {
+            PublishProxies();
+            return;
+        }
         var dx = window.MacScreen.Left - previous.Left;
         var dy = window.MacScreen.Top - previous.Top;
-        var client = new RECT
+        Place(surface, new RECT
         {
             Left = surface.Client.Left + dx, Top = surface.Client.Top + dy,
             Right = surface.Client.Left + dx + window.MacScreen.Width, Bottom = surface.Client.Top + dy + window.MacScreen.Height,
-        };
-        SetClient(surface, client);
+        });
     }
 
     /// <summary>Menu i podpowiedzi: to samo przesunięcie względem okna aplikacji co na Macu.</summary>
@@ -569,31 +610,33 @@ public sealed class DisplayViewer : IDisposable
 
     private static bool Contains(RECT r, int x, int y) => x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
 
-    /// <summary>Ramka okna tak, żeby obszar klienta wypadł dokładnie w <paramref name="client"/>.</summary>
-    private static RECT FrameFor(RECT client, SurfaceKind kind, bool hasMenu)
-    {
-        var frame = client;
-        if (kind == SurfaceKind.Window) AdjustWindowRectEx(ref frame, StyleOf(kind), hasMenu, ExStyleOf(kind));
-        return frame;
-    }
-
-    private void SetClient(Surface surface, RECT client)
+    /// <summary>Ustawia okno tak, żeby obraz wypadł w <paramref name="client"/> (pasek menu nad nim).</summary>
+    private void Place(Surface surface, RECT client)
     {
         if (client.Width <= 0 || client.Height <= 0) return;
-        if (client.Left == surface.Client.Left && client.Top == surface.Client.Top
-            && client.Width == surface.Client.Width && client.Height == surface.Client.Height) return;
-        var frame = FrameFor(client, surface.Kind, surface.Menu != IntPtr.Zero);
-        SetWindowPos(surface.Handle, IntPtr.Zero, frame.Left, frame.Top, frame.Width, frame.Height, SWP_NOZORDER | SWP_NOACTIVATE);
+        var header = surface.HeaderHeight;
+        var width = client.Width;
+        var height = client.Height;
+        if (client.Left != surface.Client.Left || client.Top != surface.Client.Top || width != surface.Client.Width
+            || height != surface.Client.Height || surface.Width == 0)
+        {
+            SetWindowPos(surface.Handle, IntPtr.Zero, client.Left, client.Top - header, width, height + header, SWP_NOZORDER | SWP_NOACTIVATE);
+            if (surface.Header != IntPtr.Zero)
+            {
+                MoveWindow(surface.Header, 0, 0, width, header, true);
+                MoveWindow(surface.Video, 0, header, width, height, true);
+            }
+        }
         SyncClient(surface);
     }
 
-    /// <summary>Po każdej zmianie ramki: faktyczny obszar klienta i rozmiar łańcucha wymiany.</summary>
+    /// <summary>Faktyczny obszar obrazu i rozmiar łańcucha wymiany po każdej zmianie okna.</summary>
     private void SyncClient(Surface surface)
     {
         if (surface.Kind == SurfaceKind.Fullscreen || IsIconic(surface.Handle)) return;
-        if (!GetClientRect(surface.Handle, out var local)) return;
+        if (!GetClientRect(surface.Video, out var local)) return;
         var origin = new POINT { X = 0, Y = 0 };
-        ClientToScreen(surface.Handle, ref origin);
+        ClientToScreen(surface.Video, ref origin);
         surface.Client = new RECT { Left = origin.X, Top = origin.Y, Right = origin.X + local.Width, Bottom = origin.Y + local.Height };
         var width = Math.Max(1, local.Width);
         var height = Math.Max(1, local.Height);
@@ -601,29 +644,34 @@ public sealed class DisplayViewer : IDisposable
         {
             surface.Width = width;
             surface.Height = height;
-            DisposeProcessor(surface); // widok wyjścia trzyma bufor łańcucha wymiany
-            surface.SwapChain?.ResizeBuffers(2, (uint)width, (uint)height, Format.B8G8R8A8_UNorm).CheckError();
+            if (surface.SwapChain is not null)
+            {
+                DisposeProcessor(surface); // widok wyjścia trzyma bufor łańcucha wymiany
+                surface.SwapChain.ResizeBuffers(2, (uint)width, (uint)height, Format.B8G8R8A8_UNorm).CheckError();
+                RequestKeyframe(surface.Id);
+            }
             ApplyShape(surface);
-            RequestKeyframe(surface.Id);
         }
         PublishProxies();
     }
 
-    /// <summary>Menu i podpowiedzi Maca mają zaokrąglone narożniki; zwykłe okna mają ramkę Windows.</summary>
+    /// <summary>Zaokrąglone rogi całego okna (pasek menu + obraz) z promieniem okna Maca.</summary>
     private static void ApplyShape(Surface surface)
     {
-        if (surface.Kind != SurfaceKind.Popup) return;
+        if (surface.Kind == SurfaceKind.Fullscreen) return;
         var radius = surface.CornerRadius;
-        if (surface.ShapeRadius == radius && surface.ShapeWidth == surface.Width && surface.ShapeHeight == surface.Height) return;
+        var width = surface.Width;
+        var height = surface.Height + surface.HeaderHeight;
+        if (surface.ShapeRadius == radius && surface.ShapeWidth == width && surface.ShapeHeight == height) return;
         surface.ShapeRadius = radius;
-        surface.ShapeWidth = surface.Width;
-        surface.ShapeHeight = surface.Height;
+        surface.ShapeWidth = width;
+        surface.ShapeHeight = height;
         if (radius == 0)
         {
             SetWindowRgn(surface.Handle, IntPtr.Zero, true);
             return;
         }
-        var region = CreateRoundRectRgn(0, 0, surface.Width + 1, surface.Height + 1, radius * 2, radius * 2);
+        var region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
         if (SetWindowRgn(surface.Handle, region, true) == 0) DeleteObject(region);
     }
 
@@ -659,25 +707,180 @@ public sealed class DisplayViewer : IDisposable
         SendMessageW(surface.Handle, WM_SETICON, 1, icon);
     }
 
-    /// <summary>Menu aplikacji Maca w nagłówku okna. Obszar klienta zostaje w tym samym miejscu.</summary>
-    private void ApplyMenu(Surface surface)
+    /// <summary>Podwójne kliknięcie paska menu: cały obszar roboczy monitora albo poprzedni rozmiar.</summary>
+    private void ToggleMaximize(Surface surface)
     {
-        if (surface.Kind != SurfaceKind.Window || !_menus.TryGetValue(surface.Pid, out var items)) return;
-        var client = surface.Client;
-        var menu = CreateMenu();
-        AppendItems(menu, items);
-        var old = surface.Menu;
-        SetWindowMenu(surface.Handle, menu);
-        surface.Menu = menu;
-        if (old != IntPtr.Zero) DestroyMenu(old);
-        DrawMenuBar(surface.Handle);
-        // Pasek menu zabiera miejsce z obszaru klienta – powiększamy ramkę zamiast zmniejszać obraz.
-        if (!surface.Maximized && !IsIconic(surface.Handle))
+        RECT target;
+        if (surface.Maximized)
         {
-            var frame = FrameFor(client, surface.Kind, hasMenu: true);
-            SetWindowPos(surface.Handle, IntPtr.Zero, frame.Left, frame.Top, frame.Width, frame.Height, SWP_NOZORDER | SWP_NOACTIVATE);
+            surface.Maximized = false;
+            target = surface.RestoreClient;
         }
-        SyncClient(surface);
+        else
+        {
+            var info = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
+            if (!GetMonitorInfo(MonitorFromWindow(surface.Handle, MONITOR_DEFAULTTONEAREST), ref info)) return;
+            surface.RestoreClient = surface.Client;
+            surface.Maximized = true;
+            var work = info.rcWork;
+            target = new RECT { Left = work.Left, Top = work.Top + surface.HeaderHeight, Right = work.Right, Bottom = work.Bottom };
+        }
+        Place(surface, target);
+        ResizeRequested?.Invoke(surface.Id, surface.Width, surface.Height);
+    }
+
+    private void Register(Surface surface)
+    {
+        _surfaces[surface.Id] = surface;
+        _byHandle[surface.Handle] = surface;
+        if (surface.Video != surface.Handle) _byHandle[surface.Video] = surface;
+        if (surface.Header != IntPtr.Zero) _byHandle[surface.Header] = surface;
+    }
+
+    private void DestroySurface(Surface surface)
+    {
+        DisposeGpu(surface);
+        _surfaces.Remove(surface.Id);
+        _byHandle.Remove(surface.Handle);
+        _byHandle.Remove(surface.Video);
+        _byHandle.Remove(surface.Header);
+        DestroyWindow(surface.Handle); // niszczy też okna potomne
+    }
+
+    private void PublishProxies()
+    {
+        _proxies = _surfaces.Values.Where(s => s.Kind != SurfaceKind.Fullscreen)
+            .ToDictionary(s => s.Handle, s => new ProxyInfo(s.Id, s.Pid, s.Kind == SurfaceKind.Popup, s.Client, s.MacPixels,
+                s.DisplayWidth, s.DisplayHeight));
+    }
+
+    // ---------------- pasek menu w stylu macOS ----------------
+
+    private IntPtr HeaderProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        if (!_byHandle.TryGetValue(hWnd, out var surface)) return DefWindowProcW(hWnd, msg, wParam, lParam);
+        switch (msg)
+        {
+            case WM_PAINT:
+                PaintHeader(surface);
+                return IntPtr.Zero;
+            case WM_ERASEBKGND:
+                return 1;
+            case WM_SETCURSOR:
+                SetCursor(LoadCursorW(IntPtr.Zero, IDC_ARROW));
+                return 1;
+            case WM_MOUSEMOVE:
+            {
+                var hover = HeaderItemAt(surface, (short)((long)lParam & 0xFFFF));
+                if (hover != surface.HoverItem)
+                {
+                    surface.HoverItem = hover;
+                    InvalidateRect(hWnd, IntPtr.Zero, false);
+                }
+                var track = new TRACKMOUSEEVENT { cbSize = (uint)Marshal.SizeOf<TRACKMOUSEEVENT>(), dwFlags = TME_LEAVE, hwndTrack = hWnd };
+                TrackMouseEvent(ref track);
+                return IntPtr.Zero;
+            }
+            case WM_MOUSELEAVE:
+                surface.HoverItem = -1;
+                InvalidateRect(hWnd, IntPtr.Zero, false);
+                return IntPtr.Zero;
+            case WM_LBUTTONDOWN:
+            {
+                var item = HeaderItemAt(surface, (short)((long)lParam & 0xFFFF));
+                if (item >= 0) ShowHeaderMenu(surface, item);
+                else
+                {
+                    // Puste miejsce paska: przeciąganie okna jak za pasek tytułu.
+                    ReleaseCapture();
+                    SendMessageW(surface.Handle, WM_NCLBUTTONDOWN, HTCAPTION, IntPtr.Zero);
+                }
+                return IntPtr.Zero;
+            }
+            case WM_LBUTTONDBLCLK:
+                if (HeaderItemAt(surface, (short)((long)lParam & 0xFFFF)) < 0) ToggleMaximize(surface);
+                return IntPtr.Zero;
+        }
+        return DefWindowProcW(hWnd, msg, wParam, lParam);
+    }
+
+    /// <summary>Pozycje paska: nazwa aplikacji (pogrubiona, jak na Macu), potem jej menu.</summary>
+    private IReadOnlyList<MacMenuItem> HeaderItems(Surface surface) =>
+        _menus.TryGetValue(surface.Pid, out var items) ? items : Array.Empty<MacMenuItem>();
+
+    private void PaintHeader(Surface surface)
+    {
+        var dc = BeginPaint(surface.Header, out var paint);
+        try
+        {
+            GetClientRect(surface.Header, out var bounds);
+            var background = CreateSolidBrush(HeaderBackground);
+            FillRect(dc, ref bounds, background);
+            DeleteObject(background);
+            var scale = surface.HeaderHeight / (double)HeaderHeight96;
+            var regular = CreateFontW(-(int)Math.Round(13 * scale), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+            var bold = CreateFontW(-(int)Math.Round(13 * scale), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+            SetBkMode(dc, 1); // TRANSPARENT
+            var items = HeaderItems(surface);
+            var labels = items.Count > 0 ? items.Select(i => (i.Title, i.Enabled)).ToList() : new List<(string, bool)> { (surface.Title, true) };
+            surface.ItemBounds.Clear();
+            var x = (int)Math.Round(14 * scale);
+            var padding = (int)Math.Round(8 * scale);
+            for (var i = 0; i < labels.Count; i++)
+            {
+                var (text, enabled) = labels[i];
+                SelectObject(dc, i == 0 ? bold : regular);
+                GetTextExtentPoint32W(dc, text, text.Length, out var size);
+                var left = x - padding;
+                var right = x + size.cx + padding;
+                if (i == surface.HoverItem && items.Count > 0)
+                {
+                    var highlight = CreateSolidBrush(HeaderHover);
+                    var old = SelectObject(dc, highlight);
+                    var pen = SelectObject(dc, GetStockObject(8)); // NULL_PEN
+                    var inset = (int)Math.Round(3 * scale);
+                    RoundRect(dc, left, inset, right, surface.HeaderHeight - inset, (int)(8 * scale), (int)(8 * scale));
+                    SelectObject(dc, pen);
+                    SelectObject(dc, old);
+                    DeleteObject(highlight);
+                }
+                SetTextColor(dc, enabled ? HeaderText : HeaderDisabled);
+                var rect = new RECT { Left = x, Top = 0, Right = x + size.cx + 1, Bottom = surface.HeaderHeight };
+                DrawTextW(dc, text, text.Length, ref rect, 0x24 | 0x800); // DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX
+                surface.ItemBounds.Add((left, right));
+                x = right + padding;
+            }
+            DeleteObject(regular);
+            DeleteObject(bold);
+        }
+        finally
+        {
+            EndPaint(surface.Header, ref paint);
+        }
+    }
+
+    private static int HeaderItemAt(Surface surface, int x)
+    {
+        for (var i = 0; i < surface.ItemBounds.Count; i++)
+            if (x >= surface.ItemBounds[i].left && x < surface.ItemBounds[i].right) return i;
+        return -1;
+    }
+
+    private void ShowHeaderMenu(Surface surface, int index)
+    {
+        var items = HeaderItems(surface);
+        if (index >= items.Count || items[index].Children.Count == 0) return;
+        MenuOpening?.Invoke(surface.Pid);
+        var menu = CreatePopupMenu();
+        AppendItems(menu, items[index].Children);
+        var origin = new POINT { X = surface.ItemBounds[index].left, Y = surface.HeaderHeight };
+        ClientToScreen(surface.Header, ref origin);
+        SetForegroundWindow(surface.Handle);
+        var command = TrackPopupMenuEx(menu, 0x0100 | 0x0002, origin.X, origin.Y, surface.Handle, IntPtr.Zero); // TPM_RETURNCMD | TPM_RIGHTBUTTON
+        DestroyMenu(menu);
+        surface.HoverItem = -1;
+        InvalidateRect(surface.Header, IntPtr.Zero, false);
+        if (command > 0) MenuInvoked?.Invoke(surface.Pid, command - 1);
     }
 
     private static void AppendItems(IntPtr menu, IReadOnlyList<MacMenuItem> items)
@@ -704,51 +907,39 @@ public sealed class DisplayViewer : IDisposable
         }
     }
 
-    private void Register(Surface surface)
-    {
-        _surfaces[surface.Id] = surface;
-        _byHandle[surface.Handle] = surface;
-    }
-
-    private void DestroySurface(Surface surface)
-    {
-        DisposeGpu(surface);
-        _surfaces.Remove(surface.Id);
-        _byHandle.Remove(surface.Handle);
-        DestroyWindow(surface.Handle); // niszczy też przypisane menu
-    }
-
-    private void PublishProxies()
-    {
-        _proxies = _surfaces.Values.Where(s => s.Kind != SurfaceKind.Fullscreen)
-            .ToDictionary(s => s.Handle, s => new ProxyInfo(s.Id, s.Pid, s.Kind == SurfaceKind.Popup, s.Client, s.MacPixels,
-                s.DisplayWidth, s.DisplayHeight));
-    }
+    private static uint Rgb(byte r, byte g, byte b) => (uint)(r | (g << 8) | (b << 16));
 
     // ---------------- okno i urządzenie ----------------
 
-    private void RegisterWindowClass()
+    private void RegisterWindowClasses()
     {
-        var classNamePtr = Marshal.StringToHGlobalUni(ClassName);
-        try
+        Register(ClassName, _wndProc, 0);
+        Register(HeaderClassName, _headerProc, CS_DBLCLKS);
+
+        static void Register(string name, WndProcDelegate proc, uint style)
         {
-            var wc = new WNDCLASSEXW
+            var namePtr = Marshal.StringToHGlobalUni(name);
+            try
             {
-                cbSize = (uint)Marshal.SizeOf<WNDCLASSEXW>(),
-                lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProc),
-                hInstance = GetModuleHandle(null),
-                hCursor = IntPtr.Zero,
-                lpszClassName = classNamePtr,
-            };
-            if (RegisterClassExW(ref wc) == 0)
-            {
-                var error = Marshal.GetLastWin32Error();
-                if (error != 1410) throw new InvalidOperationException($"RegisterClassEx failed: {error}");
+                var wc = new WNDCLASSEXW
+                {
+                    cbSize = (uint)Marshal.SizeOf<WNDCLASSEXW>(),
+                    style = style,
+                    lpfnWndProc = Marshal.GetFunctionPointerForDelegate(proc),
+                    hInstance = GetModuleHandle(null),
+                    hCursor = IntPtr.Zero,
+                    lpszClassName = namePtr,
+                };
+                if (RegisterClassExW(ref wc) == 0)
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    if (error != 1410) throw new InvalidOperationException($"RegisterClassEx failed: {error}");
+                }
             }
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(classNamePtr);
+            finally
+            {
+                Marshal.FreeHGlobal(namePtr);
+            }
         }
     }
 
@@ -791,7 +982,7 @@ public sealed class DisplayViewer : IDisposable
         CreateDevice();
         foreach (var surface in _surfaces.Values)
         {
-            surface.SwapChain = CreateSwapChain(surface.Handle, surface.Width, surface.Height);
+            surface.SwapChain = CreateSwapChain(surface.Video, surface.Width, surface.Height);
             surface.AwaitingKeyframe = true;
         }
         _frames.Clear();
@@ -801,70 +992,43 @@ public sealed class DisplayViewer : IDisposable
     private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
         _byHandle.TryGetValue(hWnd, out var surface);
+        var topLevel = surface is not null && hWnd == surface.Handle;
         switch (msg)
         {
-            case WM_SETCURSOR when ((long)lParam & 0xFFFF) == 1: // HTCLIENT – ramkę obsługuje Windows
+            case WM_SETCURSOR:
                 // Pełny pulpit: kursor Maca jest w obrazie. Okna Maca: zwykły kursor Windows.
                 SetCursor(surface?.Kind == SurfaceKind.Fullscreen ? IntPtr.Zero : LoadCursorW(IntPtr.Zero, IDC_ARROW));
                 return 1;
-            case WM_MOUSEACTIVATE when surface?.Kind != SurfaceKind.Window:
+            case WM_MOUSEACTIVATE when surface is not null && surface.Kind != SurfaceKind.Window:
                 return MA_NOACTIVATE;
-            case WM_ACTIVATE when surface?.Kind == SurfaceKind.Window:
+            case WM_ACTIVATE when topLevel && surface!.Kind == SurfaceKind.Window:
                 WindowActivated?.Invoke(surface.Id, ((long)wParam & 0xFFFF) != 0);
                 break;
-            case WM_ENTERSIZEMOVE when surface is not null:
-                surface.InSizeMove = true;
+            case WM_ENTERSIZEMOVE when topLevel:
+                surface!.InSizeMove = true;
                 break;
-            case WM_EXITSIZEMOVE when surface is not null:
-                surface.InSizeMove = false;
-                SyncClient(surface);
-                RequestResize(surface, force: true);
-                break;
-            case WM_MOVE when surface?.Kind == SurfaceKind.Window:
+            case WM_EXITSIZEMOVE when topLevel:
+                surface!.InSizeMove = false;
                 SyncClient(surface);
                 break;
-            case WM_SIZE when surface?.Kind == SurfaceKind.Window:
-            {
-                var kind = (long)wParam;
-                if (kind == SIZE_MINIMIZED) break;
-                var wasMaximized = surface.Maximized;
-                surface.Maximized = kind == SIZE_MAXIMIZED;
+            case WM_MOVE when topLevel && surface!.Kind == SurfaceKind.Window:
                 SyncClient(surface);
-                // Maksymalizacja, przywrócenie albo rozciąganie ramką: Mac dopasowuje okno do obszaru klienta.
-                if (surface.Maximized != wasMaximized) RequestResize(surface, force: true);
-                else if (surface.InSizeMove) RequestResize(surface, force: false);
-                else if (kind == SIZE_RESTORED) RequestKeyframe(surface.Id); // po przywróceniu z paska zadań
                 break;
-            }
-            case WM_COMMAND when surface?.Kind == SurfaceKind.Window && ((long)wParam >> 16 & 0xFFFF) == 0:
-            {
-                var id = (int)((long)wParam & 0xFFFF);
-                if (id > 0) MenuInvoked?.Invoke(surface.Pid, id - 1);
-                return IntPtr.Zero;
-            }
-            case WM_INITMENU when surface?.Kind == SurfaceKind.Window:
-                MenuOpening?.Invoke(surface.Pid);
+            case WM_SIZE when topLevel && surface!.Kind == SurfaceKind.Window && (long)wParam != SIZE_MINIMIZED:
+                // Po przywróceniu z paska zadań: bieżące położenie i świeży obraz.
+                SyncClient(surface);
+                RequestKeyframe(surface.Id);
                 break;
             case WM_ERASEBKGND:
                 return 1;
-            case WM_SYSCOMMAND when ((long)wParam & 0xFFF0) == SC_KEYMENU && lParam == IntPtr.Zero:
-                // Samo Alt nie może wprowadzać okna w tryb menu – Alt idzie do Maca jako Option.
-                // Kliknięcie w menu myszą działa normalnie.
+            case WM_SYSCOMMAND when ((long)wParam & 0xFFF0) == SC_KEYMENU:
+                // Alt nie otwiera menu systemowego – idzie do Maca jako Option.
                 return IntPtr.Zero;
             case WM_CLOSE:
-                if (surface?.Kind == SurfaceKind.Window) CloseRequested?.Invoke(surface.Id);
+                if (topLevel && surface!.Kind == SurfaceKind.Window) CloseRequested?.Invoke(surface.Id);
                 return IntPtr.Zero;
         }
         return DefWindowProcW(hWnd, msg, wParam, lParam);
-    }
-
-    /// <summary>W trakcie rozciągania najwyżej 10 razy na sekundę – Mac przerysowuje okno.</summary>
-    private void RequestResize(Surface surface, bool force)
-    {
-        var now = Environment.TickCount64;
-        if (!force && now - surface.LastResizeRequest < 100) return;
-        surface.LastResizeRequest = now;
-        ResizeRequested?.Invoke(surface.Id, surface.Width, surface.Height);
     }
 
     private void RequestKeyframe(uint? streamId)
@@ -933,8 +1097,9 @@ public sealed class DisplayViewer : IDisposable
         _icons.Clear();
         _menus.Clear();
         _wantFullscreenVisible = false;
-        // Klasa wskazuje na WndProc tej instancji – nie może przeżyć okien.
+        // Klasy wskazują na procedury tej instancji – nie mogą przeżyć okien.
         UnregisterClassW(ClassName, GetModuleHandle(null));
+        UnregisterClassW(HeaderClassName, GetModuleHandle(null));
     }
 
     public void Dispose()

@@ -171,9 +171,10 @@ pojawia się przy tej samej krawędzi monitora.
 ### Tryb okien
 
 W trybie okien (`mode = 1`) każde okno Maca leżące na ekranie wirtualnym ma na Windowsie
-własne okno systemowe: ramkę z paskiem tytułu i przyciskami minimalizacji, maksymalizacji
-i zamknięcia, menu aplikacji Maca w nagłówku (`WINDOW_MENU` / `MENU_INVOKE`), pasek zadań,
-Alt+Tab i zwykłą kolejność okien. Pasek menu Maca nie jest przesyłany. Okno Windows ma własne
+własne okno systemowe w stylu macOS: zaokrąglone rogi (promień z `cornerRadius`), pasek tytułu
+okna Maca w obrazie i nad nim pasek menu aplikacji (`WINDOW_MENU` / `MENU_INVOKE`), pasek
+zadań, Alt+Tab i zwykłą kolejność okien. Mac wypełnia przezroczyste narożniki okna kolorem
+paska menu (RGB 41, 41, 43), bo H.264 nie ma kanału alfa; promień mierzy osobnym zrzutem. Pasek menu Maca nie jest przesyłany. Okno Windows ma własne
 położenie (można je przenieść na inny monitor); kursor jest przeliczany względem obszaru
 klienta tego okna na odpowiadające mu okno Maca. Przesunięcie okna na Macu przesuwa okno
 Windows o tyle samo, a zmiana rozmiaru ramką lub maksymalizacja wysyła `WINDOW_RESIZE`. Mac nagrywa
