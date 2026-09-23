@@ -296,6 +296,7 @@ internal static class Program
                && Frame.DisplayKeyframe(0x01020304).SequenceEqual(Hex("830404030201")), "window commands");
         Expect(Frame.WindowResize(7, 1280, 720).SequenceEqual(Hex("37080700000000" + "05d002")) && Frame.MenuRequest(77).SequenceEqual(Hex("39044d000000"))
                && Frame.MenuInvoke(77, 3).SequenceEqual(Hex("38064d0000000300")), "resize and menu commands");
+        Expect(Enum.IsDefined(typeof(MessageType), (byte)0x89), "CURSOR_SHAPE is a known message");
         var menu = Frame.ParseWindowMenu(Hex("4d00000001000904506c696b00020001044e6f7779064374726c2b4e020000"));
         Expect(menu is { pid: 77, items: [{ Index: 0, Title: "Plik", Enabled: true, Children: [{ Index: 1, Title: "Nowy", Shortcut: "Ctrl+N" }, { Index: 2, Separator: true }] }] },
             "WINDOW_MENU tree from the Mac layout");

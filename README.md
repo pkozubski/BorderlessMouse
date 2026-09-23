@@ -212,7 +212,7 @@ Jak z tego korzystać:
 **Tryb okien** (domyślny, przełącznik „Tylko okna Maca” na Windowsie): każde okno Maca,
 które przeciągniesz na ekran wirtualny, staje się zwykłym oknem Windows.
 
-* Wygląda jak na Macu: zaokrąglone rogi, własny pasek tytułu okna (czerwony, żółty i zielony
+* Wygląda jak na Macu: wygładzone zaokrąglone rogi (DirectComposition i Direct2D), własny pasek tytułu okna (czerwony, żółty i zielony
   przycisk działają na Macu), a nad nim ciemny pasek menu aplikacji w stylu macOS (nazwa
   aplikacji, Plik, Edycja, Widok…). Kliknięcie rozwija menu ze skrótami i wyszarzeniami,
   a wybranie pozycji wywołuje ją na Macu. Pasek menu Maca nie jest potrzebny.
@@ -226,8 +226,9 @@ które przeciągniesz na ekran wirtualny, staje się zwykłym oknem Windows.
 * Ma przycisk na pasku zadań (z ikoną aplikacji Maca), jest w Alt+Tab, da się je
   zminimalizować i schować za innymi oknami. Zamknięcie zamyka je na Macu.
 * Obraz każdego okna jest nagrywany osobno, więc przesuwanie nie odsłania tapety.
-* Nad oknem Maca działa zwykły kursor Windows (bez opóźnienia obrazu). Kliknięcia
-  i przewijanie trafiają do Maca.
+* Nad oknem Maca działa zwykły kursor Windows (bez opóźnienia obrazu), a jego kształt idzie
+  za Makiem: kursor tekstowy nad tekstem, rączka nad linkami, strzałki przy krawędziach okna.
+  Kliknięcia i przewijanie trafiają do Maca.
 * Klawiatura pisze w oknie Maca, gdy jest ono aktywne, jak w każdej aplikacji Windows.
   Klawisz Win, Alt+Tab i Alt+F4 zawsze działają w Windowsie.
 * Okno wraca na MacBooka, gdy przeciągniesz je (za jego własny pasek tytułu) przez krawędź

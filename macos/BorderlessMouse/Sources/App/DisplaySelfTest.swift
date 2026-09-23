@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import CoreMedia
 import CoreVideo
@@ -22,6 +23,8 @@ enum DisplaySelfTest {
 
     static func run() -> Never {
         let args = CommandLine.arguments
+        // Kursory systemowe (i inne zasoby AppKit) ładują się dopiero po połączeniu z serwerem okien.
+        _ = NSApplication.shared
         var failures = 0
         func check(_ ok: Bool, _ message: String) {
             print(ok ? "✓ \(message)" : "✗ \(message)")
@@ -109,6 +112,15 @@ enum DisplaySelfTest {
                 print("– brak okna do testu nagrywania pojedynczego okna")
             }
         }
+
+        // Kształt kursora: każdy wzorzec rozpoznany jako on sam.
+        let tracker = CursorTracker()
+        let samples: [(CursorTracker.Shape, NSCursor)] = [(.arrow, .arrow), (.iBeam, .iBeam), (.pointingHand, .pointingHand),
+                                                          (.resizeLeftRight, .resizeLeftRight), (.resizeUpDown, .resizeUpDown),
+                                                          (.notAllowed, .operationNotAllowed)]
+        let recognized = samples.filter { tracker.identify($0.1) == $0.0 }.count
+        check(recognized == samples.count, "rozpoznawanie kursora: \(recognized)/\(samples.count)")
+        if let current = NSCursor.currentSystem { print("  obecny kursor systemu: \(tracker.identify(current))") }
 
         // 2. Koder → szyfrowany TCP → dekoder
         do {

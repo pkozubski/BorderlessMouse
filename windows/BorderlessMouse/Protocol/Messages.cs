@@ -66,6 +66,7 @@ public enum MessageType : byte
     DisplayWindows = 0x86,
     WindowIcon = 0x87,
     WindowMenu = 0x88,
+    CursorShape = 0x89,
 }
 
 /// <summary>Pozycja menu aplikacji Maca (numer = kolejność przeglądania, od 0).</summary>

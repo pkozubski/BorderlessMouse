@@ -18,7 +18,8 @@
 - Windows: "Mac display" card with a toggle, "show it whenever you control the Mac" option,
   status, throughput and restart.
 - **Window mode** (default): every Mac window dragged onto the virtual display becomes a real
-  Windows window styled like macOS — rounded corners, the Mac window's own title bar, and a dark
+  Windows window styled like macOS — antialiased rounded corners (DirectComposition +
+  Direct2D/DirectWrite), the macOS pointer shape mirrored with Windows system cursors, the Mac window's own title bar, and a dark
   macOS-style menu bar above it with the app's menu (read through Accessibility, with shortcuts
   and disabled/checked states) instead of the Mac menu bar; dragging and double-click maximize
   from that bar (the Mac window is resized to match), macOS-style close/minimize/maximize buttons

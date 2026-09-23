@@ -84,6 +84,7 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x85 | DISPLAY_MODE | W → M | `u8 mode` |
 | 0x86 | DISPLAY_WINDOWS | M → W | `u16 displayWidth`, `u16 displayHeight`, `u8 count`, `count ×` (`u32 id`, `i32 pid`, `i32 x`, `i32 y`, `u16 w`, `u16 h`, `u8 flags`, `u8 titleLength`, tytuł UTF-8); piksele ekranu wirtualnego, od najwyższego; flagi: bit 0 pasek menu, bit 1 menu/podpowiedź |
 | 0x87 | WINDOW_ICON | M → W | `i32 pid`, PNG 64×64 – ikona aplikacji na pasek zadań |
+| 0x89 | CURSOR_SHAPE | M → W | `u8 shape` – kształt kursora nad oknem Maca: 0 strzałka, 1 tekst, 2 rączka, 3 zmiana szerokości, 4 zmiana wysokości, 5 celownik, 6 zakaz, 7 otwarta dłoń, 8 zaciśnięta dłoń, 9/10 zmiana po przekątnej, 11 oczekiwanie |
 | 0x88 | WINDOW_MENU | M → W | `i32 pid`, lista pozycji: `u16 count`, dla każdej `u8 flags` (bit 0 aktywna, 1 separator, 2 zaznaczona, 3 podmenu), `u8 len` + tytuł, `u8 len` + skrót, przy podmenu zagnieżdżona lista; pozycje numerowane w kolejności przeglądania od 0 |
 
 Flagi `STATUS`: bit 0 Dostępność, bit 1 przechwytywanie audio, bit 2 kursor na Macu,

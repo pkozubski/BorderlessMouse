@@ -89,6 +89,7 @@ struct SecurityChecks {
         expect(windowFrame.encoded() == data("02012003580205000000000000000403020122000000000165"), "window frame layout")
         expect(VideoStream.Frame(decoding: windowFrame.encoded()) == windowFrame, "window frame round trip")
         expect(Frame.windowIcon(pid: 77, png: Data([0x89, 0x50])) == data("87064d0000008950"), "window icon layout")
+        expect(Frame.cursorShape(1) == data("890101"), "cursor shape layout")
         let menu = [UInt8](data("01000904506c696b00020001044e6f7779064374726c2b4e020000"))
         expect(Frame.windowMenu(pid: 77, payload: menu) == data("88%02x4d00000001000904506c696b00020001044e6f7779064374726c2b4e020000".replacingOccurrences(of: "%02x", with: String(format: "%02x", 4 + menu.count))),
                "window menu layout (shared with Windows)")

@@ -61,6 +61,7 @@ enum MessageType: UInt8 {
     case displayWindows = 0x86
     case windowIcon = 0x87
     case windowMenu = 0x88
+    case cursorShape = 0x89
 }
 
 /// Tryb ekranu wirtualnego po stronie Windows.
@@ -389,6 +390,9 @@ enum Frame {
         }
         return make(.displayWindows, w.bytes)
     }
+
+    /// Kształt kursora macOS nad oknem Maca (CursorTracker.Shape).
+    static func cursorShape(_ shape: UInt8) -> Data { make(.cursorShape, [shape]) }
 
     /// Menu aplikacji dla nagłówka okna Windows (format w MenuReader).
     static func windowMenu(pid: Int32, payload: [UInt8]) -> Data {

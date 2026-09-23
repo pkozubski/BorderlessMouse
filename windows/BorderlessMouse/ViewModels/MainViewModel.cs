@@ -579,6 +579,9 @@ public partial class MainViewModel : ObservableObject
             case MessageType.DisplayWindows:
                 if (_displayRunning && _windowModeActive && Frame.ParseDisplayWindows(payload) is { } windows) ApplyMacWindows(windows);
                 break;
+            case MessageType.CursorShape:
+                if (_displayRunning && _windowModeActive && payload.Length >= 1) _viewer?.SetCursorShape(payload[0]);
+                break;
             case MessageType.WindowMenu:
                 if (_displayRunning && _windowModeActive && Frame.ParseWindowMenu(payload) is { } menu) _viewer?.SetMenu(menu.pid, menu.items);
                 break;

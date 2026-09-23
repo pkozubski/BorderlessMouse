@@ -74,6 +74,7 @@ final class Engine {
     /// Menu aplikacji wysłane do Windowsa – pozycje do wywołania po numerze.
     private var menus: [Int32: [AXUIElement]] = [:]
     private let menuQueue = DispatchQueue(label: "blm.display.menus", qos: .userInitiated)
+    private let cursorTracker = CursorTracker()
 
     init(config: Config) {
         self.config = config
@@ -496,7 +497,13 @@ final class Engine {
             windowTracker.start(displayID: id) { [weak self] windows in
                 self?.windowsChanged(windows, displayID: id)
             }
+            let server = self.server
+            DispatchQueue.main.async { [cursorTracker] in
+                cursorTracker.onChange = { shape in server.send(Frame.cursorShape(shape.rawValue)) }
+                cursorTracker.start()
+            }
         } else {
+            DispatchQueue.main.async { [cursorTracker] in cursorTracker.stop() }
             windowTracker.stop()
             trackedWindows = [:]
             injector.windowLeave(keepKeyboard: false)
@@ -549,6 +556,7 @@ final class Engine {
         displayRunning = nil
         displayID = nil
         windowTracker.stop()
+        DispatchQueue.main.async { [cursorTracker] in cursorTracker.stop() }
         trackedWindows = [:]
         sentIcons = []
         menus = [:]
