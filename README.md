@@ -224,6 +224,8 @@ które przeciągniesz na ekran wirtualny, staje się zwykłym oknem Windows.
 * Okno wraca na MacBooka, gdy przeciągniesz je przez krawędź monitora po stronie Maca.
 * Okna, które macOS przywróciłby na ekran wirtualny z poprzedniej sesji, wracają na MacBooka,
   więc na Windowsie pojawia się tylko to, co przeniesiesz.
+* Mac nagrywa wyłącznie przeniesione okna. Dopóki żadnego nie przeniesiesz – albo gdy Windows
+  nie jest połączony – nic nie jest nagrywane, a macOS nie pokazuje wskaźnika udostępniania.
 
 W trybie całego pulpitu opcja **Pokazuj go przez cały czas sterowania Makiem** wyświetla
 pulpit Maca od razu po przejściu na Maca, nie dopiero po przeciągnięciu na niego okna.

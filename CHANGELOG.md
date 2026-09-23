@@ -25,7 +25,8 @@
   Windows window), the keyboard follows the active window with Windows shortcuts kept local,
   dropping a window hands the pointer to Windows, dragging it across the Mac-side edge returns
   it to the MacBook. Windows restored by macOS from a previous session are moved back to the
-  MacBook. New messages `MOUSE_ABSOLUTE`, `WINDOW_ENTER/LEAVE/HANDOFF/RAISE/CLOSE`,
+  MacBook. Nothing is captured until a window is moved (not even the whole virtual display).
+  New messages `MOUSE_ABSOLUTE`, `WINDOW_ENTER/LEAVE/HANDOFF/RAISE/CLOSE`,
   `DISPLAY_MODE`, `DISPLAY_WINDOWS`, `WINDOW_ICON`, per-window video frames and STATUS bit 6.
 - Local macOS builds are signed with the Apple Development identity when available, so
   privacy permissions survive rebuilds.

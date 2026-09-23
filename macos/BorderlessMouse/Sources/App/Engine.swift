@@ -476,7 +476,9 @@ final class Engine {
     }
 
     /// Kolejka trackera: strumienie okien, lista dla Windowsa i ikony nowych aplikacji.
-    private func windowsChanged(_ windows: [TrackedWindow], displayID: CGDirectDisplayID) {
+    private func windowsChanged(_ tracked: [TrackedWindow], displayID: CGDirectDisplayID) {
+        // Pusty ekran wirtualny = nic nie nagrywamy (sam pasek menu nie jest potrzebny).
+        let windows = tracked.contains { !$0.isMenuBar } ? tracked : []
         display.updateWindows(windows)
         let descriptors = windows.map { WindowTracker.descriptor($0, on: displayID) }
         let mode = CGDisplayCopyDisplayMode(displayID)

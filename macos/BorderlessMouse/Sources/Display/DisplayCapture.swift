@@ -31,6 +31,9 @@ final class DisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private let sampleQueue = DispatchQueue(label: "blm.display.capture", qos: .userInteractive)
     private var stream: SCStream?
+    private let stateLock = NSLock()
+    /// stop() w trakcie startu: strumień zostanie zatrzymany zaraz po uruchomieniu.
+    private var stopRequested = false
     /// W trybie okien kursor rysuje Windows (bez opóźnienia wideo), więc Mac go pomija.
     private(set) var showsCursor = true
 
@@ -40,7 +43,16 @@ final class DisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     @discardableResult
     static func requestPermission() -> Bool { CGRequestScreenCaptureAccess() }
 
+    var isRunning: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return stream != nil
+    }
+
     func start(displayID: CGDirectDisplayID, width: Int, height: Int, showsCursor: Bool = true) async throws {
+        stateLock.lock()
+        stopRequested = false
+        stateLock.unlock()
         self.showsCursor = showsCursor
         guard Self.hasPermission else { throw CaptureError.permissionDenied }
         let display = try await Self.findDisplay(displayID)
@@ -48,7 +60,11 @@ final class DisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         let stream = SCStream(filter: filter, configuration: Self.configuration(width: width, height: height, showsCursor: showsCursor), delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
         try await stream.startCapture()
-        self.stream = stream
+        stateLock.lock()
+        let cancelled = stopRequested
+        if !cancelled { self.stream = stream }
+        stateLock.unlock()
+        if cancelled { try? await stream.stopCapture() }
     }
 
     func update(width: Int, height: Int, showsCursor: Bool? = nil) async throws {
@@ -57,9 +73,12 @@ final class DisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() {
-        guard let stream else { return }
+        stateLock.lock()
+        stopRequested = true
+        let stream = self.stream
         self.stream = nil
-        stream.stopCapture { _ in }
+        stateLock.unlock()
+        stream?.stopCapture { _ in }
     }
 
     private static func configuration(width: Int, height: Int, showsCursor: Bool) -> SCStreamConfiguration {

@@ -277,6 +277,9 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private let sampleQueue = DispatchQueue(label: "blm.display.windowcapture", qos: .userInteractive)
     private var stream: SCStream?
     private var displayBounds = CGRect.zero
+    private let stateLock = NSLock()
+    /// Okno (np. podpowiedź) zniknęło, zanim nagrywanie ruszyło – zatrzymujemy je od razu po starcie.
+    private var stopRequested = false
 
     func start(windowID: UInt32?, displayID: CGDirectDisplayID, menuBarRect: CGRect, width: Int, height: Int) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -298,8 +301,16 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                                                            width: width, height: height),
                               delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
+        stateLock.lock()
+        let early = stopRequested
+        stateLock.unlock()
+        if early { return }
         try await stream.startCapture()
-        self.stream = stream
+        stateLock.lock()
+        let cancelled = stopRequested
+        if !cancelled { self.stream = stream }
+        stateLock.unlock()
+        if cancelled { try? await stream.stopCapture() }
     }
 
     func update(menuBarRect: CGRect?, width: Int, height: Int) async throws {
@@ -307,9 +318,12 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() {
-        guard let stream else { return }
+        stateLock.lock()
+        stopRequested = true
+        let stream = self.stream
         self.stream = nil
-        stream.stopCapture { _ in }
+        stateLock.unlock()
+        stream?.stopCapture { _ in }
     }
 
     private func configuration(menuBarRect: CGRect?, width: Int, height: Int) -> SCStreamConfiguration {

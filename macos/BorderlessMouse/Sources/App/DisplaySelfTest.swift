@@ -92,6 +92,17 @@ enum DisplaySelfTest {
                 check(!own.isEmpty && own.first?.isKeyframe == true, "strumień okna: \(own.count) klatek, pierwsza kluczowa")
                 check(own.contains { $0.cornerRadius > 0 }, "promień narożnika w nagłówku klatki: \(own.last?.cornerRadius ?? 0) px")
                 check(own.filter(\.isKeyframe).count >= 2, "klatka kluczowa na żądanie (DISPLAY_KEYFRAME z id okna)")
+                // Okno znika, zanim nagrywanie ruszy (np. podpowiedź): nagrywanie nie może zostać włączone.
+                let transient = WindowCapture()
+                var lateFrames = 0
+                transient.onFrame = { _, _ in lock.lock(); lateFrames += 1; lock.unlock() }
+                Task { try? await transient.start(windowID: window.id, displayID: CGMainDisplayID(), menuBarRect: .zero, width: 640, height: 480) }
+                transient.stop()
+                usleep(1_500_000)
+                lock.lock()
+                let leaked = lateFrames
+                lock.unlock()
+                check(leaked == 0, "zatrzymanie w trakcie startu nie zostawia działającego nagrywania (\(leaked) klatek)")
             } else {
                 print("– brak okna do testu nagrywania pojedynczego okna")
             }

@@ -43,7 +43,6 @@ final class DisplayStreamer {
     /// Rośnie przy każdym starcie i zatrzymaniu – spóźniony start nie nadpisze nowszego stanu.
     private var generation: UInt64 = 0
     private var lastStats: (frames: UInt64, bytes: UInt64) = (0, 0)
-    private var showsCursor = true
     private var windowStreams: WindowStreams?
 
     // chronione frameLock (kolejka przechwytywania i wątek VideoToolbox)
@@ -63,7 +62,6 @@ final class DisplayStreamer {
     func start(_ request: DisplayStartRequest, name: String, completion: @escaping (Result<Ready, Error>) -> Void) {
         queue.async {
             self.stopLocked()
-            self.showsCursor = true
             self.frameLock.lock()
             self.fullStreamEnabled = request.mode == .fullscreen
             self.frameLock.unlock()
@@ -86,10 +84,25 @@ final class DisplayStreamer {
             self.frameLock.unlock()
             if full {
                 self.windowStreams?.stop()
-                self.forceKeyframe()
-            } else if let displayID {
-                self.windowStreams?.start(displayID: displayID)
+                self.startFullCapture()
+            } else {
+                self.capture?.stop()
+                if let displayID { self.windowStreams?.start(displayID: displayID) }
             }
+        }
+    }
+
+    /// Na `queue`: wznawia nagrywanie całego ekranu po przełączeniu na pełny pulpit.
+    private func startFullCapture() {
+        guard active, let capture, let encoder, let display = virtualDisplay, !capture.isRunning else {
+            forceKeyframe()
+            return
+        }
+        let (width, height, displayID) = (encoder.width, encoder.height, display.displayID)
+        let queue = self.queue
+        Task { [weak self] in
+            try? await capture.start(displayID: displayID, width: width, height: height)
+            queue.async { self?.forceKeyframe() }
         }
     }
 
@@ -150,8 +163,10 @@ final class DisplayStreamer {
                 self.bitrate = encoder.bitrate
                 self.wire(capture: capture, encoder: encoder, server: server)
             }
-            let showsCursor = onQueue { self.showsCursor }
-            try await capture.start(displayID: display.displayID, width: width, height: height, showsCursor: showsCursor)
+            // Tryb okien nagrywa tylko przeniesione okna – całego ekranu nie nagrywamy wcale.
+            if request.mode == .fullscreen {
+                try await capture.start(displayID: display.displayID, width: width, height: height)
+            }
             try onQueue {
                 guard generation == self.generation else {
                     capture.stop()
