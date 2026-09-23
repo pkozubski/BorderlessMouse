@@ -33,6 +33,19 @@
   MacBook. Nothing is captured until a window is moved (not even the whole virtual display).
   New messages `MOUSE_ABSOLUTE`, `WINDOW_ENTER/LEAVE/HANDOFF/RAISE/CLOSE`,
   `DISPLAY_MODE`, `DISPLAY_WINDOWS`, `WINDOW_ICON`, per-window video frames and STATUS bit 6.
+- **Windows apps on the Mac** (experimental, reverse direction). A one-time, admin-approved
+  install of the signed, MIT-licensed Virtual Display Driver (downloaded from GitHub with pinned
+  SHA-256 checksums) gives Windows a virtual monitor. The app attaches it next to the Mac-side
+  edge only during a session, sized like the Mac screen in points, and detaches it afterwards
+  (also after a crash). Dragging a window across that edge moves it onto the monitor; the Mac
+  shows each such window as a native macOS window in the same place (one DXGI Desktop
+  Duplication capture, NV12 on the GPU with a CPU fallback, Media Foundation H.264, the same
+  encrypted one-time video channel, VideoToolbox decoding into IOSurfaces cropped per window,
+  rounded corners). The Windows pointer stays local over those windows (the Mac mirrors it and
+  its shape), leaving them hands control to the Mac at that point, and moving the Mac pointer
+  onto one hands it back to Windows. Protocol: `WINVIEW_*` (0x90–0x97) and STATUS bit 7.
+- Windows: encrypted control frames are sealed and queued atomically, so frames sent from
+  several threads can no longer reach the Mac out of order.
 - Local macOS builds are signed with the Apple Development identity when available, so
   privacy permissions survive rebuilds.
 - The virtual display is entered only while dragging (a mouse button is held); plain pointer

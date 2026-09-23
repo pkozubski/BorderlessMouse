@@ -26,6 +26,12 @@ GitHub release hosting. GitHub receives ordinary connection metadata such as
 the public IP address and user agent. See GitHub's privacy statement for its
 processing. No clipboard, input or audio content is included in update checks.
 
+If you install the virtual monitor driver for Windows apps on the Mac, the Windows
+application downloads the Virtual Display Driver and nefcon releases from GitHub
+once, verifies their SHA-256 checksums and installs them with administrator
+approval. The contents of that virtual monitor are sent only to the paired Mac
+over the encrypted local connection.
+
 ## Diagnostics
 
 Logs remain on the device unless the user chooses to copy and send them. Users

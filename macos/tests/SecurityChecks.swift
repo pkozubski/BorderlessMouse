@@ -95,6 +95,23 @@ struct SecurityChecks {
                "window menu layout (shared with Windows)")
         expect(Frame.windowHandoff(x: 0x1234, y: 0xFFFF) == data("34041234ffff".replacingOccurrences(of: "1234", with: "3412")),
                "window handoff layout")
+        // Okna Windows na Macu (WINVIEW_*), wektory wspólne z Windows.
+        let winList = WinWindowList(payload: Array(data("941aae0653040104030201f6ffffff14000000200358020303c48462").dropFirst(2)))
+        expect(winList == WinWindowList(displayWidth: 1710, displayHeight: 1107, windows: [
+            WinWindowDescriptor(id: 0x01020304, x: -10, y: 20, width: 800, height: 600, flags: 3, title: "Ąb"),
+        ]), "WINVIEW_WINDOWS from the Windows layout")
+        expect(winList?.windows.first?.isForeground == true && winList?.windows.first?.isPopup == true, "WINVIEW_WINDOWS flags")
+        expect(WinWindowList(payload: Array(data("941aae0653040104030201f6ffffff14000000200358020303c48462").dropFirst(2).dropLast())) == nil, "truncated WINVIEW_WINDOWS rejected")
+        expect(winList.map { Data([0x94, 0x1a] + $0.payload) } == data("941aae0653040104030201f6ffffff14000000200358020303c48462"), "WINVIEW_WINDOWS round trip")
+        expect(WinCursorUpdate(payload: Array(data("2c01c8000101"))) == WinCursorUpdate(x: 300, y: 200, shape: 1, visible: true),
+               "WINVIEW_CURSOR from the Windows layout")
+        expect(Frame.winViewReady(status: 0, port: 50123, key: Data((0..<32).map { UInt8($0 * 7 & 0xFF) }), token: Data(repeating: 0x5A, count: 16),
+                                  screenWidth: 1710, screenHeight: 1107, scalePercent: 200, message: "ok")
+               == data("913b00cbc300070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d95a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5aae065304c8006f6b"), "WINVIEW_READY layout (shared with Windows)")
+        expect(Frame.winViewPointerEnter(x: 0x1234, y: 0xFFFF) == data("95043412ffff") && Frame.winViewKeyframe() == data("9300"),
+               "WINVIEW pointer enter and keyframe layouts")
+        expect(StatusFlags.winViewSupported.rawValue == 0x80, "WINVIEW status bit")
+
         var badCodec = request.payload
         badCodec[7] = 9
         expect(DisplayStartRequest(payload: badCodec) == nil, "unknown video codec rejected")

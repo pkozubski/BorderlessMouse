@@ -82,6 +82,49 @@ public static class VideoStream
         return record;
     }
 
+    /// <summary>Kind 1 (cały monitor): nagłówek klatki + Annex B – tekst jawny rekordu.</summary>
+    public static byte[] EncodeFrame(bool keyframe, int width, int height, ulong captureMicros, ReadOnlySpan<byte> annexB)
+    {
+        var clear = new byte[FrameHeaderBytes + annexB.Length];
+        clear[0] = KindH264AccessUnit;
+        clear[1] = keyframe ? FlagKeyframe : (byte)0;
+        BinaryPrimitives.WriteUInt16LittleEndian(clear.AsSpan(2), (ushort)width);
+        BinaryPrimitives.WriteUInt16LittleEndian(clear.AsSpan(4), (ushort)height);
+        BinaryPrimitives.WriteUInt64LittleEndian(clear.AsSpan(6), captureMicros);
+        annexB.CopyTo(clear.AsSpan(FrameHeaderBytes));
+        return clear;
+    }
+
+    /// <summary>Szyfruje kolejne rekordy (strumień okien Windows → Mac). Jeden wątek.</summary>
+    public sealed class Sealer : IDisposable
+    {
+        private readonly AesGcm _aes;
+        private ulong _counter;
+
+        public Sealer(ReadOnlySpan<byte> key)
+        {
+            if (key.Length != KeyBytes) throw new ArgumentException("invalid video key", nameof(key));
+            _aes = new AesGcm(key, TagBytes);
+        }
+
+        /// <summary>Kompletny rekord z prefiksem długości.</summary>
+        public byte[] Seal(ReadOnlySpan<byte> plaintext)
+        {
+            var body = CounterBytes + plaintext.Length + TagBytes;
+            if (body > MaxRecordBytes || _counter == ulong.MaxValue) throw new InvalidOperationException("video record too large");
+            var record = new byte[LengthBytes + body];
+            BinaryPrimitives.WriteUInt32LittleEndian(record, (uint)body);
+            BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(LengthBytes), _counter);
+            var nonce = Nonce(_counter);
+            _aes.Encrypt(nonce, plaintext, record.AsSpan(LengthBytes + CounterBytes, plaintext.Length),
+                record.AsSpan(LengthBytes + CounterBytes + plaintext.Length, TagBytes), nonce);
+            _counter++;
+            return record;
+        }
+
+        public void Dispose() => _aes.Dispose();
+    }
+
     /// <summary>Odszyfrowuje kolejne rekordy. Licznik musi rosnąć dokładnie o jeden (TCP).</summary>
     public sealed class Opener : IDisposable
     {

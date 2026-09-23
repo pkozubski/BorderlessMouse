@@ -261,6 +261,26 @@ Dobrze wiedzieć:
 Samotest na Macu (tworzy na chwilę monitor, sprawdza koder i szyfrowany kanał):
 `BorderlessMouse.app/Contents/MacOS/BorderlessMouse --display-selftest`.
 
+### Okna Windows na Macu
+
+W drugą stronę: przeciągnij okno Windows za krawędź po stronie Maca, a pojawi się na ekranie
+Maca jako zwykłe okno macOS – dalej działa w Windowsie, bez opóźnień myszy i klawiatury.
+
+* Wymaga jednorazowej instalacji darmowego, podpisanego sterownika
+  [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT).
+  Na Windowsie: *Sterowanie → Okna Windows na Macu → Zainstaluj* (pojawi się okno zgody
+  administratora). Instalator pobiera sterownik i narzędzie
+  [nefcon](https://github.com/nefarius/nefcon) z GitHuba, sprawdza ich sumy SHA-256
+  i zapisuje konfigurację w `C:\VirtualDisplayDriver`.
+* Monitor wirtualny jest podłączony tylko w czasie sesji (przy krawędzi po stronie Maca, w
+  rozmiarze ekranu Maca w punktach) i odłączany po niej, więc okna nie giną na niewidocznym
+  ekranie. Po awarii aplikacja odłącza go przy następnym uruchomieniu.
+* Zwykły ruch kursora przez krawędź nadal przełącza na Maca; na monitor wirtualny wjeżdża się
+  tylko, przeciągając okno. Nad oknem Windows na Macu kursor i klawiatura działają w Windowsie;
+  po zjechaniu z okna kursor steruje Makiem, a klawiatura zostaje w oknie Windows do pierwszego
+  kliknięcia na Macu. Przeciągnięcie okna z powrotem przez krawędź przenosi je na monitor Windows.
+* Sterownik usuniesz w *Menedżerze urządzeń → Karty graficzne → Virtual Display Driver*.
+
 ### Gry i pełny ekran
 
 Automatyczne przejście kursora na Maca jest wstrzymane, gdy aktywna aplikacja zajmuje
@@ -363,6 +383,7 @@ windows/
 * [NAudio](https://github.com/naudio/NAudio) (MIT) – WASAPI
 * [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) (MIT)
 * [Inter](https://github.com/rsms/inter) (SIL OFL 1.1) – krój pisma interfejsu Windows
+* [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT) i [nefcon](https://github.com/nefarius/nefcon) (MIT) – pobierane na żądanie przy instalacji monitora wirtualnego, nie są dołączone do aplikacji
 * ANGLE (licencja BSD) oraz SkiaSharp/HarfBuzzSharp (MIT) – natywne renderowanie Avalonia
 * Mechanika przełączania krawędzią i hooków wzorowana na Synergy/Barrier/Deskflow (GPL – kod nie jest kopiowany).
 
@@ -370,8 +391,10 @@ windows/
 
 * Schowek synchronizuje tekst i obrazy; nie przesyła plików ani formatowania tekstu.
   Animowane obrazy są przesyłane jako pojedyncza klatka PNG.
-* Kierunek tylko Windows → Mac (wejście) i Mac → Windows (dźwięk); protokół jest gotowy na
-  rozszerzenie o kierunek odwrotny.
+* Wejście płynie tylko z Windowsa do Maca (klawiatura i mysz Windows sterują oboma
+  komputerami); okna Windows na Macu obsługuje się myszą i klawiaturą Windows.
+* Okna Windows na Macu mają rozdzielczość ekranu Maca w punktach (tekst jest nieco mniej ostry
+  niż natywny Retina).
 * Caps Lock jest przekazywany jako zwykły klawisz – macOS może go ignorować.
 * Audio jest szyfrowane, ale nieskompresowane; przy 48 kHz stereo zużywa około 1,5 Mb/s.
 * Protokół v2 nie łączy się ze starszymi buildami korzystającymi z protokołu v1.

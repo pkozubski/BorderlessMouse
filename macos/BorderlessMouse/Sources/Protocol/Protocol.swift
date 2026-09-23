@@ -62,6 +62,14 @@ enum MessageType: UInt8 {
     case windowIcon = 0x87
     case windowMenu = 0x88
     case cursorShape = 0x89
+    case winViewStart = 0x90
+    case winViewReady = 0x91
+    case winViewStop = 0x92
+    case winViewKeyframe = 0x93
+    case winViewWindows = 0x94
+    case winViewPointerEnter = 0x95
+    case winViewCursor = 0x96
+    case winViewPointerLeave = 0x97
 }
 
 /// Tryb ekranu wirtualnego po stronie Windows.
@@ -132,6 +140,88 @@ struct StatusFlags: OptionSet {
     static let displayStreaming = StatusFlags(rawValue: 1 << 5)
     /// Mac obsługuje tryb okien (DISPLAY_MODE, DISPLAY_WINDOWS, WINDOW_*).
     static let windowModeSupported = StatusFlags(rawValue: 1 << 6)
+    /// Mac potrafi pokazać okna Windows (WINVIEW_*).
+    static let winViewSupported = StatusFlags(rawValue: 1 << 7)
+}
+
+/// Okno Windows leżące na wirtualnym monitorze Windows (sterownik Virtual Display Driver),
+/// w pikselach tego monitora. Mac pokazuje je jako własne okno w tym samym miejscu ekranu.
+struct WinWindowDescriptor: Equatable {
+    let id: UInt32
+    let x: Int32, y: Int32, width: UInt16, height: UInt16
+    let flags: UInt8
+    let title: String
+
+    /// Aktywne okno Windows (ma klawiaturę).
+    static let foreground: UInt8 = 1 << 0
+    /// Menu, podpowiedź, lista rozwijana – bez cienia i zaokrągleń.
+    static let popup: UInt8 = 1 << 1
+
+    var isForeground: Bool { flags & Self.foreground != 0 }
+    var isPopup: Bool { flags & Self.popup != 0 }
+}
+
+/// Lista okien Windows (od najwyższego) z rozmiarem wirtualnego monitora.
+struct WinWindowList: Equatable {
+    let displayWidth: Int
+    let displayHeight: Int
+    let windows: [WinWindowDescriptor]
+
+    init(displayWidth: Int, displayHeight: Int, windows: [WinWindowDescriptor]) {
+        self.displayWidth = displayWidth
+        self.displayHeight = displayHeight
+        self.windows = windows
+    }
+
+    init?(payload: [UInt8]) {
+        var r = ByteReader(payload)
+        guard let w = r.u16(), let h = r.u16(), w > 0, h > 0, let count = r.u8() else { return nil }
+        var windows: [WinWindowDescriptor] = []
+        for _ in 0..<count {
+            guard let id = r.u32(), let x = r.u32(), let y = r.u32(), let width = r.u16(), let height = r.u16(),
+                  let flags = r.u8(), let titleLength = r.u8(), let title = r.bytes(Int(titleLength)) else { return nil }
+            windows.append(WinWindowDescriptor(id: id, x: Int32(bitPattern: x), y: Int32(bitPattern: y),
+                                               width: width, height: height, flags: flags,
+                                               title: String(decoding: title, as: UTF8.self)))
+        }
+        guard r.remaining == 0 else { return nil }
+        self.init(displayWidth: Int(w), displayHeight: Int(h), windows: windows)
+    }
+
+    var payload: [UInt8] {
+        var w = ByteWriter()
+        w.u16(UInt16(clamping: displayWidth))
+        w.u16(UInt16(clamping: displayHeight))
+        let limited = windows.prefix(64)
+        w.u8(UInt8(limited.count))
+        for window in limited {
+            w.u32(window.id)
+            w.u32(UInt32(bitPattern: window.x)); w.u32(UInt32(bitPattern: window.y))
+            w.u16(window.width); w.u16(window.height)
+            w.u8(window.flags)
+            let title = Array(String(decoding: window.title.utf8.prefix(120), as: UTF8.self).utf8)
+            w.u8(UInt8(title.count))
+            w.raw(title)
+        }
+        return w.bytes
+    }
+}
+
+/// Kursor Windows na wirtualnym monitorze Windows (piksele) i jego kształt (jak CURSOR_SHAPE).
+struct WinCursorUpdate: Equatable {
+    let x: UInt16, y: UInt16
+    let shape: UInt8
+    let visible: Bool
+
+    init(x: UInt16, y: UInt16, shape: UInt8, visible: Bool) {
+        self.x = x; self.y = y; self.shape = shape; self.visible = visible
+    }
+
+    init?(payload: [UInt8]) {
+        var r = ByteReader(payload)
+        guard payload.count == 6, let x = r.u16(), let y = r.u16(), let shape = r.u8(), let visible = r.u8() else { return nil }
+        self.init(x: x, y: y, shape: shape, visible: visible != 0)
+    }
 }
 
 /// Prośba Windowsa o wirtualny monitor Maca wyświetlany na ekranie Windows.
@@ -235,6 +325,12 @@ struct ByteReader {
     mutating func f32() -> Float? {
         guard let bits = u32() else { return nil }
         return Float(bitPattern: bits)
+    }
+
+    mutating func bytes(_ count: Int) -> [UInt8]? {
+        guard count >= 0, remaining >= count else { return nil }
+        defer { offset += count }
+        return Array(bytes[offset..<(offset + count)])
     }
 
     mutating func restAsString() -> String {
@@ -415,6 +511,38 @@ enum Frame {
         var w = ByteWriter()
         w.u16(x); w.u16(y)
         return make(.windowHandoff, w.bytes)
+    }
+
+    /// Odpowiedź na WINVIEW_START: port jednorazowego odbiornika, klucz, token i ekran Maca,
+    /// na którym pojawią się okna Windows (punkty i skala). `status != 0` = błąd lub koniec.
+    static func winViewReady(status: UInt8, port: UInt16, key: Data, token: Data,
+                             screenWidth: Int, screenHeight: Int, scalePercent: Int, message: String) -> Data {
+        precondition(key.isEmpty || key.count == VideoStream.keyBytes)
+        precondition(token.isEmpty || token.count == VideoStream.tokenBytes)
+        var w = ByteWriter()
+        w.u8(status)
+        w.u16(port)
+        w.raw(key.isEmpty ? [UInt8](repeating: 0, count: VideoStream.keyBytes) : Array(key))
+        w.raw(token.isEmpty ? [UInt8](repeating: 0, count: VideoStream.tokenBytes) : Array(token))
+        w.u16(UInt16(clamping: screenWidth))
+        w.u16(UInt16(clamping: screenHeight))
+        w.u16(UInt16(clamping: scalePercent))
+        w.string(String(decoding: message.utf8.prefix(200), as: UTF8.self))
+        return make(.winViewReady, w.bytes)
+    }
+
+    static func winViewFailed(_ message: String) -> Data {
+        winViewReady(status: 1, port: 0, key: Data(), token: Data(), screenWidth: 0, screenHeight: 0,
+                     scalePercent: 0, message: message)
+    }
+
+    static func winViewKeyframe() -> Data { make(.winViewKeyframe) }
+
+    /// Kursor sterowany z Windowsa wszedł na okno Windows (piksele wirtualnego monitora Windows).
+    static func winViewPointerEnter(x: UInt16, y: UInt16) -> Data {
+        var w = ByteWriter()
+        w.u16(x); w.u16(y)
+        return make(.winViewPointerEnter, w.bytes)
     }
 
     static func ping(_ ts: UInt64) -> Data {

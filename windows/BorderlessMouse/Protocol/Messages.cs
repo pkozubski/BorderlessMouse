@@ -67,6 +67,14 @@ public enum MessageType : byte
     WindowIcon = 0x87,
     WindowMenu = 0x88,
     CursorShape = 0x89,
+    WinViewStart = 0x90,
+    WinViewReady = 0x91,
+    WinViewStop = 0x92,
+    WinViewKeyframe = 0x93,
+    WinViewWindows = 0x94,
+    WinViewPointerEnter = 0x95,
+    WinViewCursor = 0x96,
+    WinViewPointerLeave = 0x97,
 }
 
 /// <summary>Pozycja menu aplikacji Maca (numer = kolejność przeglądania, od 0).</summary>
@@ -114,6 +122,22 @@ public enum StatusFlags : byte
     DisplayStreaming = 1 << 5,
     /// <summary>Mac obsługuje tryb okien.</summary>
     WindowModeSupported = 1 << 6,
+    /// <summary>Mac pokazuje okna Windows (WINVIEW_*).</summary>
+    WinViewSupported = 1 << 7,
+}
+
+/// <summary>Okno Windows na wirtualnym monitorze (piksele tego monitora, może wystawać poza niego).</summary>
+public sealed record WinWindow(uint Id, int X, int Y, int Width, int Height, byte Flags, string Title)
+{
+    public const byte Foreground = 0x01;
+    public const byte Popup = 0x02;
+}
+
+/// <summary>Odpowiedź Maca na WINVIEW_START: odbiornik strumienia i ekran Maca (punkty, skala w %).</summary>
+public sealed record WinViewReadyInfo(byte Status, ushort Port, byte[] Key, byte[] Token, int ScreenWidth, int ScreenHeight,
+    int ScalePercent, string Message)
+{
+    public bool IsOk => Status == 0;
 }
 
 /// <summary>Odpowiedź Maca na DISPLAY_START (lub komunikat o zatrzymaniu, gdy Status != 0).</summary>
@@ -357,6 +381,82 @@ public static class Frame
         BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)index);
         return Make(MessageType.MenuInvoke, p);
     }
+
+    // --- okna Windows na Macu ---
+
+    /// <summary>Prośba o pokazywanie okien Windows na Macu; <paramref name="macEdgeFacingWindows"/> wskazuje ekran Maca.</summary>
+    public static byte[] WinViewStart(ScreenEdge macEdgeFacingWindows) => Make(MessageType.WinViewStart, [(byte)macEdgeFacingWindows]);
+    public static byte[] WinViewStop() => Make(MessageType.WinViewStop, ReadOnlySpan<byte>.Empty);
+
+    /// <summary>Okna Windows na wirtualnym monitorze, od najwyższego (najwyżej 64).</summary>
+    public static byte[] WinViewWindows(int displayWidth, int displayHeight, IReadOnlyList<WinWindow> windows)
+    {
+        var buffer = new List<byte>(5 + windows.Count * 48);
+        var scratch = new byte[4];
+        void U16(int value) { BinaryPrimitives.WriteUInt16LittleEndian(scratch, (ushort)Math.Clamp(value, 0, 65535)); buffer.Add(scratch[0]); buffer.Add(scratch[1]); }
+        void I32(int value) { BinaryPrimitives.WriteInt32LittleEndian(scratch, value); buffer.AddRange(scratch); }
+        U16(displayWidth);
+        U16(displayHeight);
+        var count = Math.Min(windows.Count, 64);
+        buffer.Add((byte)count);
+        for (var i = 0; i < count; i++)
+        {
+            var w = windows[i];
+            BinaryPrimitives.WriteUInt32LittleEndian(scratch, w.Id);
+            buffer.AddRange(scratch);
+            I32(w.X);
+            I32(w.Y);
+            U16(w.Width);
+            U16(w.Height);
+            buffer.Add(w.Flags);
+            var title = Utf8Prefix(w.Title, 120);
+            buffer.Add((byte)title.Length);
+            buffer.AddRange(title);
+        }
+        return Make(MessageType.WinViewWindows, buffer.ToArray());
+    }
+
+    /// <summary>Kursor Windows na wirtualnym monitorze (piksele) i kształt (numeracja CURSOR_SHAPE).</summary>
+    public static byte[] WinViewCursor(int x, int y, byte shape, bool visible)
+    {
+        Span<byte> p = stackalloc byte[6];
+        BinaryPrimitives.WriteUInt16LittleEndian(p, (ushort)Math.Clamp(x, 0, 65535));
+        BinaryPrimitives.WriteUInt16LittleEndian(p[2..], (ushort)Math.Clamp(y, 0, 65535));
+        p[4] = shape;
+        p[5] = visible ? (byte)1 : (byte)0;
+        return Make(MessageType.WinViewCursor, p);
+    }
+
+    /// <summary>Kursor zszedł z okien Windows – Mac przejmuje sterowanie w tym punkcie monitora.</summary>
+    public static byte[] WinViewPointerLeave(int x, int y)
+        => Point(MessageType.WinViewPointerLeave, (ushort)Math.Clamp(x, 0, 65535), (ushort)Math.Clamp(y, 0, 65535));
+
+    private static byte[] Utf8Prefix(string value, int maxBytes)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        if (bytes.Length <= maxBytes) return bytes;
+        var length = maxBytes;
+        while (length > 0 && (bytes[length] & 0xC0) == 0x80) length--; // nie tniemy znaku UTF-8
+        return bytes[..length];
+    }
+
+    public static WinViewReadyInfo? ParseWinViewReady(ReadOnlySpan<byte> p)
+    {
+        const int fixedBytes = 1 + 2 + VideoStream.KeyBytes + VideoStream.TokenBytes + 2 + 2 + 2;
+        if (p.Length < fixedBytes || p.Length > fixedBytes + 200) return null;
+        var offset = 3;
+        var key = p.Slice(offset, VideoStream.KeyBytes).ToArray();
+        offset += VideoStream.KeyBytes;
+        var token = p.Slice(offset, VideoStream.TokenBytes).ToArray();
+        offset += VideoStream.TokenBytes;
+        return new WinViewReadyInfo(p[0], BinaryPrimitives.ReadUInt16LittleEndian(p[1..]), key, token,
+            BinaryPrimitives.ReadUInt16LittleEndian(p[offset..]), BinaryPrimitives.ReadUInt16LittleEndian(p[(offset + 2)..]),
+            BinaryPrimitives.ReadUInt16LittleEndian(p[(offset + 4)..]), Encoding.UTF8.GetString(p[fixedBytes..]));
+    }
+
+    /// <summary>WINVIEW_POINTER_ENTER: kursor Maca wjechał na okno Windows (piksele wirtualnego monitora).</summary>
+    public static (int x, int y)? ParseWinViewPointerEnter(ReadOnlySpan<byte> p)
+        => p.Length >= 4 ? (BinaryPrimitives.ReadUInt16LittleEndian(p), BinaryPrimitives.ReadUInt16LittleEndian(p[2..])) : null;
 
     public static byte[] Ping(ulong ts)
     {

@@ -305,6 +305,29 @@ internal static class Program
         Expect(Frame.DisplayStop().SequenceEqual(Hex("8100")) && Frame.DisplayKeyframe().SequenceEqual(Hex("8300")), "display control frames");
 
         var key = Enumerable.Range(0, 32).Select(i => (byte)(i * 7 & 0xFF)).ToArray();
+
+        // Okna Windows na Macu (WINVIEW_*), wektory wspólne z macOS.
+        Expect(Frame.WinViewWindows(1710, 1107, [new WinWindow(0x01020304, -10, 20, 800, 600, 3, "Ąb")]).SequenceEqual(Hex("941aae0653040104030201f6ffffff14000000200358020303c48462")),
+            "WINVIEW_WINDOWS matches the Mac layout");
+        Expect(Frame.WinViewCursor(300, 200, 1, true).SequenceEqual(Hex("96062c01c8000101")), "WINVIEW_CURSOR");
+        Expect(Frame.WinViewPointerLeave(0x1234, 5).SequenceEqual(Hex("970434120500")) && Frame.WinViewStart(ScreenEdge.Right).SequenceEqual(Hex("900101"))
+               && Frame.WinViewStop().SequenceEqual(Hex("9200")), "WINVIEW control frames");
+        Expect(Frame.TryParseSingle(Hex("913b00cbc300070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d95a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5aae065304c8006f6b"), out var winReadyType, out var winReadyPayload) && winReadyType == MessageType.WinViewReady
+               && Frame.ParseWinViewReady(winReadyPayload) is { IsOk: true, Port: 50123, ScreenWidth: 1710, ScreenHeight: 1107, ScalePercent: 200, Message: "ok" } winReady
+               && winReady.Key.SequenceEqual(key) && winReady.Token.All(b => b == 0x5A), "WINVIEW_READY from the Mac layout");
+        Expect(Frame.ParseWinViewReady(winReadyPayload.AsSpan(0, 30)) is null, "truncated WINVIEW_READY rejected");
+        Expect(Frame.ParseWinViewPointerEnter(Hex("3412ffff")) == (0x1234, 0xFFFF), "WINVIEW_POINTER_ENTER from the Mac layout");
+        Expect((byte)StatusFlags.WinViewSupported == 0x80, "WINVIEW status bit");
+        var fullFrame = VideoStream.EncodeFrame(true, 800, 600, 5, Hex("0000000165"));
+        Expect(fullFrame.SequenceEqual(Hex("01012003580205000000000000000000000165")) && VideoStream.TryParseFrame(fullFrame, out var fullParsed)
+               && fullParsed is { Width: 800, Height: 600, IsKeyframe: true, StreamId: 0 }, "full-display frame layout");
+        using (var sealer = new VideoStream.Sealer(key))
+        {
+            Expect(sealer.Seal(Encoding.UTF8.GetBytes("BorderlessMouse video vector")).SequenceEqual(VideoStream.Seal(key, 0, Encoding.UTF8.GetBytes("BorderlessMouse video vector")))
+                   && sealer.Seal(new byte[] { 1, 2, 3 }).SequenceEqual(VideoStream.Seal(key, 1, new byte[] { 1, 2, 3 })), "streaming sealer counts records");
+        }
+        CheckNv12Conversion();
+
         var readyFrame = Hex("823900cbc300070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d95a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a000aa0056f6b");
         Expect(Frame.TryParseSingle(readyFrame, out var readyType, out var readyPayload) && readyType == MessageType.DisplayReady, "DISPLAY_READY frame");
         var ready = Frame.ParseDisplayReady(readyPayload);
@@ -355,6 +378,7 @@ internal static class Program
             return;
         }
         DecodeFixture(frames, colors);
+        EncodeRoundTrip();
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -394,6 +418,85 @@ internal static class Program
             }
         }
         Console.WriteLine("✓ Virtual display: Media Foundation decodes the VideoToolbox H.264 stream with the expected colours");
+    }
+
+    /// <summary>Konwersja CPU BGRA → NV12 (BT.709, zakres wideo) dla strumienia okien Windows.</summary>
+    private static void CheckNv12Conversion()
+    {
+        int[][] colors = [[220, 30, 30], [30, 200, 60], [40, 60, 230], [255, 255, 255], [0, 0, 0]];
+        foreach (var color in colors)
+        {
+            var nv12 = Nv12For(color, 4, 4);
+            var decoded = Bt709ToRgb(nv12[5], nv12[16], nv12[17]);
+            Expect(decoded.Zip(color).All(pair => Math.Abs(pair.First - pair.Second) <= 4),
+                $"NV12 conversion of {string.Join(",", color)} gives {string.Join(",", decoded)}");
+        }
+        Console.WriteLine("✓ Windows apps on the Mac: WINVIEW protocol vectors shared with macOS, NV12 conversion");
+    }
+
+    private static byte[] Nv12For(int[] rgb, int width, int height)
+    {
+        var bgra = new byte[width * height * 4];
+        for (var i = 0; i < width * height; i++)
+        {
+            bgra[i * 4] = (byte)rgb[2];
+            bgra[i * 4 + 1] = (byte)rgb[1];
+            bgra[i * 4 + 2] = (byte)rgb[0];
+            bgra[i * 4 + 3] = 255;
+        }
+        var nv12 = new byte[width * height * 3 / 2];
+        BorderlessMouse.Display.Nv12Converter.FromBgra(bgra, width * 4, width, height, nv12);
+        return nv12;
+    }
+
+    /// <summary>Koder Media Foundation → dekoder Media Foundation: klatki kluczowe z SPS/PPS i poprawne kolory.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void EncodeRoundTrip()
+    {
+        BorderlessMouse.Display.H264Encoder encoder;
+        try
+        {
+            encoder = new BorderlessMouse.Display.H264Encoder(160, 96);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  (koder H.264 niedostępny: {ex.Message})");
+            return;
+        }
+        int[][] colors = [[220, 30, 30], [30, 200, 60], [40, 60, 230]];
+        var encoded = new List<(byte[] data, bool key)>();
+        using (encoder)
+        {
+            for (var i = 0; i < colors.Length; i++)
+            {
+                var result = encoder.Encode(Nv12For(colors[i], 160, 96), i * 166_667L, forceKeyframe: i != 1);
+                Expect(result is not null, $"encoder returned frame {i + 1}");
+                encoded.Add(result!.Value);
+            }
+        }
+        Expect(encoded[0].key && BorderlessMouse.Display.H264Encoder.ContainsNal(encoded[0].data, 7)
+               && BorderlessMouse.Display.H264Encoder.ContainsNal(encoded[0].data, 8), "first frame is a keyframe with SPS/PPS");
+        Expect(encoded[2].key && BorderlessMouse.Display.H264Encoder.ContainsNal(encoded[2].data, 7), "forced keyframe carries SPS/PPS");
+        Expect(!encoded[1].key, "middle frame is predicted");
+        using var decoder = new BorderlessMouse.Display.H264Decoder(null, 160, 96);
+        var decoded = new List<int[]>();
+        foreach (var (data, _) in encoded)
+        {
+            decoder.Decode(data, sample =>
+            {
+                var nv12 = decoder.CopyNv12(sample);
+                var stride = decoder.OutputStride;
+                var chroma = stride * decoder.OutputHeight + 24 * stride + 40 * 2;
+                decoded.Add(Bt709ToRgb(nv12[48 * stride + 80], nv12[chroma], nv12[chroma + 1]));
+            });
+        }
+        Expect(decoded.Count == colors.Length, $"decoded {decoded.Count}/{colors.Length} encoded frames");
+        for (var i = 0; i < Math.Min(decoded.Count, colors.Length); i++)
+        {
+            Expect(decoded[i].Zip(colors[i]).All(pair => Math.Abs(pair.First - pair.Second) <= 24),
+                $"encoded frame {i + 1}: expected {string.Join(",", colors[i])}, got {string.Join(",", decoded[i])}");
+        }
+        Console.WriteLine("✓ Windows apps on the Mac: Media Foundation encoder (Annex B, SPS/PPS on keyframes) round trip");
     }
 
     private static int[] Bt709ToRgb(byte y, byte cb, byte cr)

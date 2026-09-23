@@ -49,6 +49,11 @@ public sealed class Settings
     /// <summary>true = tylko okna Maca na pulpicie Windows; false = cały pulpit ekranu wirtualnego.</summary>
     public bool DisplayWindowMode { get; set; } = true;
 
+    /// <summary>Okna Windows przeciągnięte za krawędź po stronie Maca pokazują się na Macu (Virtual Display Driver).</summary>
+    public bool WinViewEnabled { get; set; } = true;
+    /// <summary>Aplikacja podłączyła wirtualny monitor – po awarii odłączamy go przy starcie.</summary>
+    public bool WinViewAttached { get; set; }
+
     public bool AutoCheckUpdates { get; set; } = true;
 
     public bool StartMinimized { get; set; } = true;

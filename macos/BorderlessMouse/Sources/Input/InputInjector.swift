@@ -31,6 +31,11 @@ final class InputInjector {
     /// Okno upuszczone na ekranie wirtualnym (punkt w globalnych współrzędnych macOS).
     var onVirtualDrop: ((CGPoint) -> Void)?
 
+    /// Okna Windows na Macu: punkt ekranu → piksel wirtualnego monitora Windows, gdy leży
+    /// w oknie Windows. Wtedy kursor przejmuje Windows (`onWinViewEnter`).
+    var winViewHitTest: ((CGPoint) -> (x: UInt16, y: UInt16)?)?
+    var onWinViewEnter: ((UInt16, UInt16) -> Void)?
+
     private(set) var isActive = false
     private(set) var isOnVirtualDisplay = false
     /// Tryb okien: kursor Windows jest nad oknem Maca i steruje nim w pozycjach bezwzględnych.
@@ -144,6 +149,26 @@ final class InputInjector {
         postMouse(.mouseMoved, dx: 0, dy: 0)
     }
 
+    /// Kursor wraca na Maca z okna Windows pokazanego na Macu – w punkcie, w którym zszedł z okna.
+    /// `edge`: krawędź Maca zwrócona w stronę Windowsa (tam oddajemy sterowanie).
+    func enter(at point: CGPoint, edge: ScreenEdge) {
+        displays = Self.activeDisplays()
+        let target = displays.first { $0.bounds.contains(point) && $0.id != virtualDisplayID }
+            ?? displays.first { $0.id != virtualDisplayID } ?? displays[0]
+        currentDisplay = target
+        position = CGPoint(x: min(max(point.x, target.bounds.minX), target.bounds.maxX - 1),
+                           y: min(max(point.y, target.bounds.minY), target.bounds.maxY - 1))
+        returnEdge = edge
+        isWindowInput = false
+        hasWindowKeyboard = false
+        setVirtualFocus(false)
+        if !isActive {
+            isActive = true
+            onActiveChanged?(true)
+        }
+        postMouse(.mouseMoved, dx: 0, dy: 0)
+    }
+
     // MARK: - Tryb okien (pozycje bezwzględne)
 
     func windowEnter(at point: CGPoint) {
@@ -228,6 +253,13 @@ final class InputInjector {
             }
             position.x = min(max(candidate.x, b.minX), b.maxX - 1)
             position.y = min(max(candidate.y, b.minY), b.maxY - 1)
+        }
+        if buttonsDown.isEmpty, let hit = winViewHitTest?(position) {
+            // Kursor wjechał na okno Windows: dalej steruje nim Windows (bez opóźnienia obrazu).
+            postMouse(.mouseMoved, dx: dx, dy: dy)
+            deactivate()
+            onWinViewEnter?(hit.x, hit.y)
+            return
         }
         postMouse(dragTypeForCurrentButtons(), dx: dx, dy: dy, button: dragButton())
     }

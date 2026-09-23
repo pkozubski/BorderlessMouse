@@ -271,13 +271,19 @@ internal static class DisplayNative
         return monitors.OrderByDescending(edge).ThenByDescending(m => m.Primary).First();
     }
 
+    /// <summary>Wirtualny monitor okien Windows na Macu – nie jest fizycznym monitorem Windows.</summary>
+    public static RECT? ExcludedArea { get; set; }
+
     public static List<MonitorArea> Monitors()
     {
         var list = new List<MonitorArea>();
+        var excluded = ExcludedArea;
         EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr monitor, IntPtr _, ref RECT _, IntPtr _) =>
         {
             var info = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
             if (!GetMonitorInfo(monitor, ref info)) return true;
+            if (excluded is { } area && info.rcMonitor.Left == area.Left && info.rcMonitor.Top == area.Top
+                && info.rcMonitor.Right == area.Right && info.rcMonitor.Bottom == area.Bottom) return true;
             var dpi = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out var dpiX, out _) == 0 ? (int)dpiX : 96;
             list.Add(new MonitorArea(info.rcMonitor, dpi, (info.dwFlags & MONITORINFOF_PRIMARY) != 0));
             return true;

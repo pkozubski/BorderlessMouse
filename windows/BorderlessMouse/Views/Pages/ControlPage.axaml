@@ -79,6 +79,30 @@
             <Border Classes="card">
                 <StackPanel Spacing="12">
                     <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="OKNA WINDOWS NA MACU" />
+                    </StackPanel>
+                    <views:SettingRow Title="Przenoś okna Windows na Maca"
+                                      Subtitle="Przeciągnij okno za krawędź po stronie Maca – pojawi się na ekranie Maca i dalej działa w Windowsie.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding WinViewEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" IsVisible="{Binding WinViewDriverMissing}" />
+                    <views:SettingRow Title="Sterownik monitora wirtualnego" IsVisible="{Binding WinViewDriverMissing}"
+                                      Subtitle="Jednorazowa instalacja darmowego, podpisanego sterownika Virtual Display Driver (wymaga zgody administratora).">
+                        <Button Content="Zainstaluj" Command="{Binding InstallDisplayDriverCommand}" IsEnabled="{Binding !IsInstallingDriver}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Stan" Subtitle="{Binding WinViewStatsText}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Ellipse Width="8" Height="8" Fill="{Binding WinViewStatusBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding WinViewStatusText}" MaxWidth="300" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
                         <TextBlock Text="DŹWIĘK" />
                     </StackPanel>
                     <views:SettingRow Title="Odbieraj dźwięk z Maca"

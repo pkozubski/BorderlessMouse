@@ -85,11 +85,19 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x86 | DISPLAY_WINDOWS | M → W | `u16 displayWidth`, `u16 displayHeight`, `u8 count`, `count ×` (`u32 id`, `i32 pid`, `i32 x`, `i32 y`, `u16 w`, `u16 h`, `u8 flags`, `u8 titleLength`, tytuł UTF-8); piksele ekranu wirtualnego, od najwyższego; flagi: bit 0 pasek menu, bit 1 menu/podpowiedź |
 | 0x87 | WINDOW_ICON | M → W | `i32 pid`, PNG 64×64 – ikona aplikacji na pasek zadań |
 | 0x89 | CURSOR_SHAPE | M → W | `u8 shape` – kształt kursora nad oknem Maca: 0 strzałka, 1 tekst, 2 rączka, 3 zmiana szerokości, 4 zmiana wysokości, 5 celownik, 6 zakaz, 7 otwarta dłoń, 8 zaciśnięta dłoń, 9/10 zmiana po przekątnej, 11 oczekiwanie |
+| 0x90 | WINVIEW_START | W → M | `u8 edge` – krawędź Maca zwrócona w stronę Windowsa; Windows chce pokazywać swoje okna na Macu |
+| 0x91 | WINVIEW_READY | M → W | `u8 status`, `u16 port`, `32 B key`, `16 B token`, `u16 screenWidth`, `u16 screenHeight` (punkty ekranu Maca), `u16 scalePercent`, komunikat |
+| 0x92 | WINVIEW_STOP | W → M | – |
+| 0x93 | WINVIEW_KEYFRAME | M → W | – |
+| 0x94 | WINVIEW_WINDOWS | W → M | `u16 displayWidth`, `u16 displayHeight`, `u8 count`, `count ×` (`u32 id`, `i32 x`, `i32 y`, `u16 w`, `u16 h`, `u8 flags`, `u8 titleLength`, tytuł UTF-8); piksele monitora wirtualnego Windows, od najwyższego; flagi: bit 0 aktywne, bit 1 menu/podpowiedź |
+| 0x95 | WINVIEW_POINTER_ENTER | M → W | `u16 x`, `u16 y` – kursor sterowany z Windowsa wjechał na okno Windows pokazane na Macu (piksele monitora wirtualnego) |
+| 0x96 | WINVIEW_CURSOR | W → M | `u16 x`, `u16 y`, `u8 shape` (jak `CURSOR_SHAPE`), `u8 visible` – kursor Windows na monitorze wirtualnym |
+| 0x97 | WINVIEW_POINTER_LEAVE | W → M | `u16 x`, `u16 y` – kursor zszedł z okien Windows; Mac przejmuje sterowanie w tym punkcie |
 | 0x88 | WINDOW_MENU | M → W | `i32 pid`, lista pozycji: `u16 count`, dla każdej `u8 flags` (bit 0 aktywna, 1 separator, 2 zaznaczona, 3 podmenu), `u8 len` + tytuł, `u8 len` + skrót, przy podmenu zagnieżdżona lista; pozycje numerowane w kolejności przeglądania od 0 |
 
 Flagi `STATUS`: bit 0 Dostępność, bit 1 przechwytywanie audio, bit 2 kursor na Macu,
 bit 3 Mac obsługuje ekran wirtualny, bit 4 ekran wirtualny włączony na Macu,
-bit 5 strumień ekranu działa, bit 6 Mac obsługuje tryb okien. Windows wysyła `DISPLAY_*` dopiero, gdy widzi bit 3 –
+bit 5 strumień ekranu działa, bit 6 Mac obsługuje tryb okien, bit 7 Mac pokazuje okna Windows (`WINVIEW_*`). Windows wysyła `DISPLAY_*` dopiero, gdy widzi bit 3 –
 starsza wersja Maca nie zna tych typów i zerwałaby sesję.
 
 Schowek przyjmuje tekst do 1 MiB i PNG do 32 MiB / 64 megapikseli. Nieznane,
@@ -196,6 +204,39 @@ jako osobne strumienie `kind = 2`; listę okien (`DISPLAY_WINDOWS`) do ~30 razy 
   Mac zachowuje wciśnięty przycisk, więc okno przechodzi na ekran MacBooka.
 * Okna przywrócone przez macOS z poprzedniej sesji Mac odsyła na fizyczny ekran, więc
   każda sesja zaczyna się bez okien.
+
+## Okna Windows na Macu
+
+Kierunek odwrotny do ekranu wirtualnego Maca. Windows ma wirtualny monitor ze sterownika
+[Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT,
+podpisany; instalowany raz, za zgodą administratora). Aplikacja podłącza go do pulpitu tylko na
+czas sesji, przy krawędzi po stronie Maca, i odłącza po niej (okna wracają na monitory Windows).
+
+1. Windows wysyła `WINVIEW_START` z krawędzią Maca zwróconą w stronę Windowsa (tylko gdy
+   Mac ma bit 7 w `STATUS`).
+2. Mac wybiera ekran przy tej krawędzi, otwiera jednorazowy port TCP i odpowiada
+   `WINVIEW_READY` z portem, losowym kluczem i tokenem oraz rozmiarem tego ekranu w punktach.
+3. Windows ustawia monitor wirtualny na ten rozmiar (dopisuje go do konfiguracji sterownika,
+   jeśli trzeba), podłącza się do portu, wysyła token i dalej wysyła rekordy w formacie
+   strumienia ekranu (`kind = 1`, cały monitor wirtualny; H.264 bez klatek B, SPS/PPS przed
+   każdą klatką kluczową, BT.709, zakres 16–235). Obraz nagrywa DXGI Desktop Duplication, więc
+   nieruchomy monitor nie generuje ruchu. Mac prosi o klatkę kluczową przez `WINVIEW_KEYFRAME`.
+4. Okna leżące na monitorze wirtualnym (`WINVIEW_WINDOWS`) Mac pokazuje jako własne okna w tym
+   samym miejscu swojego ekranu; każde przycina wspólny obraz do swojego prostokąta.
+
+Wejście:
+
+* Przeciągnięcie okna Windows (wciśnięty przycisk) przez krawędź po stronie Maca wprowadza
+  kursor i okno na monitor wirtualny – okno pojawia się na Macu. Zwykły ruch przez tę krawędź
+  nadal przełącza sterowanie na Maca (`ENTER`).
+* Kursor Windows na monitorze wirtualnym pozostaje lokalny (bez opóźnienia): kliknięcia
+  i klawiatura trafiają wprost do okien Windows, a Mac pokazuje swój kursor w tym miejscu
+  (`WINVIEW_CURSOR`).
+* Gdy kursor zejdzie z okien Windows (bez wciśniętego przycisku), Windows wysyła
+  `WINVIEW_POINTER_LEAVE` i od tego punktu steruje Makiem jak po `ENTER`. Klawiatura zostaje
+  w aktywnym oknie Windows do pierwszego kliknięcia na Macu.
+* Kursor sterowany z Windowsa, który na Macu wjedzie na okno Windows, powoduje
+  `WINVIEW_POINTER_ENTER` – Windows przejmuje kursor w tym punkcie monitora wirtualnego.
 
 ## Granice zaufania
 

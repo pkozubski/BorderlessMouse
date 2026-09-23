@@ -70,6 +70,15 @@ public partial class MainViewModel : ObservableObject
     private MacWindowList? _macWindows;
     /// <summary>Tryb okien: aktywne okno Windows to okno Maca (wtedy widać też pasek menu Maca).</summary>
     private bool _macWindowActive;
+    // okna Windows na Macu
+    private WinViewStreamer? _winStreamer;
+    private WinViewTracker? _winTracker;
+    /// <summary>Wysłano WINVIEW_START; po błędzie zostaje true, żeby nie ponawiać w pętli.</summary>
+    private bool _winViewRequested;
+    private bool _winViewRunning;
+    private readonly Stopwatch _winViewStatsClock = new();
+    private long _winViewStatsBytes;
+    private long _winViewStatsFrames;
     private readonly Stopwatch _displayStatsClock = new();
     private long _displayStatsBytes;
     private long _displayStatsFrames;
@@ -111,6 +120,7 @@ public partial class MainViewModel : ObservableObject
         _displayEnabled = _settings.DisplayEnabled;
         _showMacDisplayWhileRemote = _settings.ShowMacDisplayWhileRemote;
         _displayWindowMode = _settings.DisplayWindowMode;
+        _winViewEnabled = _settings.WinViewEnabled;
         _autoCheckUpdates = _settings.AutoCheckUpdates;
         _startMinimized = _settings.StartMinimized;
         _hasCompletedOnboarding = _settings.HasCompletedOnboarding;
@@ -134,6 +144,7 @@ public partial class MainViewModel : ObservableObject
         _videoRx.FrameReceived += frame => _viewer?.Enqueue(frame);
         _videoRx.Closed += reason => Post(() => OnDisplayFailed(reason ?? T("Strumień ekranu zakończony.", "The display stream ended.")));
 
+        RecoverWinViewMonitor();
         _statsTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) => UpdateStats());
         _loading = false;
         UpdateStatus();
@@ -167,6 +178,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _displayEnabled;
     [ObservableProperty] private bool _showMacDisplayWhileRemote;
     [ObservableProperty] private bool _displayWindowMode;
+    [ObservableProperty] private bool _winViewEnabled;
+    [ObservableProperty] private bool _winViewDriverMissing;
+    [ObservableProperty] private bool _isInstallingDriver;
     [ObservableProperty] private bool _autoCheckUpdates;
     [ObservableProperty] private bool _launchAtLogin;
     [ObservableProperty] private bool _startMinimized;
@@ -204,6 +218,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _displayStatusText = T("Nieaktywny – uruchamia się po połączeniu z Makiem.", "Inactive — starts after connecting to the Mac.");
     [ObservableProperty] private IBrush _displayStatusBrush = Gray;
     [ObservableProperty] private string _displayStatsText = "";
+    [ObservableProperty] private string _winViewStatusText = T("Nieaktywne – uruchamia się po połączeniu z Makiem.", "Inactive — starts after connecting to the Mac.");
+    [ObservableProperty] private IBrush _winViewStatusBrush = Gray;
+    [ObservableProperty] private string _winViewStatsText = "";
 
     // aktualizacje
     [ObservableProperty] private bool _updateAvailable;
@@ -424,6 +441,8 @@ public partial class MainViewModel : ObservableObject
         _updateTimer?.Stop();
         StopAudio(notifyMac: true);
         StopDisplay(notifyMac: true);
+        StopWinView(notifyMac: true);
+        _winStreamer?.Dispose();
         _viewer?.Dispose();
         _viewer = null;
         _capture?.Dispose();
@@ -540,7 +559,9 @@ public partial class MainViewModel : ObservableObject
         ApplyHookState(); // bez połączenia hooki są zbędne
         StopAudio(notifyMac: false);
         StopDisplay(notifyMac: false);
+        StopWinView(notifyMac: false);
         _macFlags = StatusFlags.None;
+        SetWinViewStatus(T("Nieaktywne – uruchamia się po połączeniu z Makiem.", "Inactive — starts after connecting to the Mac."), Gray);
         SetDisplayStatus(T("Nieaktywny – uruchamia się po połączeniu z Makiem.", "Inactive — starts after connecting to the Mac."), Gray);
         MacStatusText = "";
         MacAccessibilityMissing = false;
@@ -602,6 +623,20 @@ public partial class MainViewModel : ObservableObject
             case MessageType.AudioFormat:
                 if (Frame.ParseAudioFormat(payload) is { } fmt) OnAudioFormat(fmt);
                 break;
+            case MessageType.WinViewReady:
+                if (Frame.ParseWinViewReady(payload) is { } winReady) _ = OnWinViewReadyAsync(winReady);
+                break;
+            case MessageType.WinViewKeyframe:
+                _winStreamer?.RequestKeyframe();
+                _winTracker?.Resend();
+                break;
+            case MessageType.WinViewPointerEnter:
+                if (_winViewRunning && _winTracker is { } tracker && Frame.ParseWinViewPointerEnter(payload) is { } enter)
+                {
+                    var m = tracker.Monitor;
+                    _capture?.EnterWinView(new NativeMethods.POINT { X = m.Left + enter.x, Y = m.Top + enter.y });
+                }
+                break;
             case MessageType.Clipboard:
                 if (ClipboardSyncEnabled && _clipboardSync is not null && Frame.ParseClipboard(payload) is { } content)
                 {
@@ -613,8 +648,10 @@ public partial class MainViewModel : ObservableObject
                 {
                     var flags = (StatusFlags)payload[0];
                     var displayFlagsChanged = (flags & DisplayFlagsMask) != (_macFlags & DisplayFlagsMask);
+                    var winViewChanged = (flags & StatusFlags.WinViewSupported) != (_macFlags & StatusFlags.WinViewSupported);
                     _macFlags = flags;
                     if (displayFlagsChanged) EvaluateDisplay();
+                    if (winViewChanged) EvaluateWinView();
                     var ax = flags.HasFlag(StatusFlags.AccessibilityGranted);
                     MacAccessibilityMissing = !ax;
                     MacStatusText = ax
@@ -734,6 +771,7 @@ public partial class MainViewModel : ObservableObject
                     if (proxy.Id == id) return MapToMac(proxy, point);
                 return null;
             };
+            _capture.DraggingMacWindow = () => _viewer?.MovingWindowId is > 0;
             _capture.MacWindowIsForeground = () =>
                 _viewer?.Proxies.TryGetValue(NativeMethods.GetForegroundWindow(), out var proxy) == true && !proxy.Popup;
         }
@@ -879,6 +917,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (CursorOnMac) UpdateStatus();
         UpdateDisplayStats();
+        UpdateWinViewStats();
         if (!AudioActive || _jitter is null)
         {
             AudioLevel = 0;
@@ -889,6 +928,217 @@ public partial class MainViewModel : ObservableObject
             $"bufor {_jitter.BufferedMs} ms · pakiety {_audioRx.PacketsReceived} · utracone {_audioRx.PacketsLost} · odrzucone {_audioRx.PacketsRejected} · niedopełnienia {_jitter.Underruns} · przepełnienia {_jitter.Overruns}",
             $"buffer {_jitter.BufferedMs} ms · packets {_audioRx.PacketsReceived} · lost {_audioRx.PacketsLost} · rejected {_audioRx.PacketsRejected} · underruns {_jitter.Underruns} · overruns {_jitter.Overruns}");
         if (IsConnected) UpdateStatus();
+    }
+
+    // ------------------------------------------------------------------
+    // Okna Windows na Macu
+    // ------------------------------------------------------------------
+
+    private void SetWinViewStatus(string text, IBrush brush)
+    {
+        WinViewStatusText = text;
+        WinViewStatusBrush = brush;
+    }
+
+    /// <summary>Uruchamia okna Windows na Macu, gdy obie strony je obsługują i jest sterownik.</summary>
+    private void EvaluateWinView()
+    {
+        if (!IsConnected || !OperatingSystem.IsWindows()) return;
+        if (!WinViewEnabled)
+        {
+            SetWinViewStatus(T("Wyłączone w ustawieniach.", "Turned off in settings."), Gray);
+            return;
+        }
+        if (!_macFlags.HasFlag(StatusFlags.WinViewSupported))
+        {
+            SetWinViewStatus(T("Mac nie obsługuje okien Windows – zaktualizuj aplikację na Macu.", "The Mac cannot show Windows apps — update the Mac app."), Gray);
+            return;
+        }
+        if (_winViewRequested) return;
+        WinViewDriverMissing = !VirtualDisplayDriver.IsInstalled;
+        if (WinViewDriverMissing)
+        {
+            SetWinViewStatus(T("Potrzebny jest sterownik monitora wirtualnego – kliknij „Zainstaluj”.", "The virtual monitor driver is required — select Install."), Orange);
+            return;
+        }
+        _client.Send(Frame.WinViewStart(InputCapture.EntryEdgeFor(SelectedMacSide.Value)));
+        _winViewRequested = true;
+        SetWinViewStatus(T("Uruchamianie…", "Starting…"), Orange);
+    }
+
+    private async Task OnWinViewReadyAsync(WinViewReadyInfo info)
+    {
+        try
+        {
+            if (!_winViewRequested || _winViewRunning || !OperatingSystem.IsWindows()) return;
+            if (!info.IsOk)
+            {
+                StopWinViewLocal();
+                SetWinViewStatus(T("Mac: ", "Mac: ") + info.Message, Red);
+                if (info.Message.Length > 0) Log(T("Okna Windows: ", "Windows apps: ") + info.Message);
+                return;
+            }
+            var monitor = VirtualDisplayDriver.Find() ?? throw new InvalidOperationException(
+                T("Nie znaleziono monitora wirtualnego.", "The virtual monitor was not found."));
+            // Monitor wirtualny ma rozmiar ekranu Maca w punktach – okna wyglądają na Macu jak u siebie.
+            var width = info.ScreenWidth;
+            var height = info.ScreenHeight;
+            if (!VirtualDisplayDriver.Modes(monitor.DeviceName).Contains((width, height)) && VirtualDisplayDriver.TryAddMode(width, height))
+            {
+                for (var i = 0; i < 24; i++)
+                {
+                    await Task.Delay(250);
+                    if (VirtualDisplayDriver.Find() is { } reloaded && VirtualDisplayDriver.Modes(reloaded.DeviceName).Contains((width, height)))
+                    {
+                        monitor = reloaded;
+                        break;
+                    }
+                }
+            }
+            if (!_winViewRequested) return;
+            (width, height) = ClosestMode(VirtualDisplayDriver.Modes(monitor.DeviceName), width, height);
+            DisplayNative.ExcludedArea = monitor.Attached ? monitor.Bounds : null;
+            var physical = DisplayNative.Monitors();
+            if (physical.Count == 0) throw new InvalidOperationException("No monitors");
+            var bounds = Union(physical.Select(m => m.Bounds));
+            var (x, y) = SelectedMacSide.Value switch
+            {
+                MacSide.Left => (bounds.Left - width, physical.Where(m => m.Bounds.Left == bounds.Left).Min(m => m.Bounds.Top)),
+                MacSide.Right => (bounds.Right, physical.Where(m => m.Bounds.Right == bounds.Right).Min(m => m.Bounds.Top)),
+                MacSide.Top => (physical.Where(m => m.Bounds.Top == bounds.Top).Min(m => m.Bounds.Left), bounds.Top - height),
+                _ => (physical.Where(m => m.Bounds.Bottom == bounds.Bottom).Min(m => m.Bounds.Left), bounds.Bottom),
+            };
+            VirtualDisplayDriver.Attach(monitor.DeviceName, width, height, x, y);
+            _settings.WinViewAttached = true;
+            SaveSettings();
+            var attached = VirtualDisplayDriver.Find();
+            if (attached is not { Attached: true } live) throw new InvalidOperationException(
+                T("Windows nie podłączył monitora wirtualnego.", "Windows did not attach the virtual monitor."));
+            DisplayNative.ExcludedArea = live.Bounds;
+            var client = _client;
+            _winTracker = new WinViewTracker(live.Bounds, frame => { if (client.IsConnected) client.Send(frame); });
+            _winTracker.Start();
+            _capture?.SetWinView(_winTracker, Union(DisplayNative.Monitors().Select(m => m.Bounds)));
+            if (_winStreamer is null)
+            {
+                _winStreamer = new WinViewStreamer();
+                _winStreamer.Failed += message => Post(() => OnWinViewFailed(message));
+            }
+            _winStreamer.Start(live.DeviceName, IPAddress.Parse(_client.RemoteAddress), info.Port, info.Key, info.Token);
+            _winViewRunning = true;
+            _winViewStatsClock.Restart();
+            _winViewStatsBytes = _winViewStatsFrames = 0;
+            SetWinViewStatus(T($"Działa · monitor {live.Bounds.Width}×{live.Bounds.Height} po stronie Maca",
+                $"Running · {live.Bounds.Width}×{live.Bounds.Height} monitor on the Mac side"), Green);
+            Log(T($"Okna Windows na Macu: monitor wirtualny {live.Bounds.Width}×{live.Bounds.Height} ({live.DeviceName})",
+                $"Windows apps on the Mac: {live.Bounds.Width}×{live.Bounds.Height} virtual monitor ({live.DeviceName})"));
+        }
+        catch (Exception ex)
+        {
+            if (_client.IsConnected) _client.Send(Frame.WinViewStop());
+            StopWinViewLocal();
+            SetWinViewStatus(ex.Message, Red);
+            Log(T("Okna Windows: ", "Windows apps: ") + ex.Message);
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(info.Key);
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(info.Token);
+        }
+    }
+
+    private static (int width, int height) ClosestMode(List<(int Width, int Height)> modes, int width, int height)
+    {
+        if (modes.Count == 0 || modes.Contains((width, height))) return (width, height);
+        var aspect = (double)width / height;
+        return modes.OrderBy(m => Math.Abs((double)m.Width / m.Height - aspect) > 0.02)
+            .ThenBy(m => Math.Abs(m.Width * m.Height - width * height)).First();
+    }
+
+    private static NativeMethods.RECT Union(IEnumerable<NativeMethods.RECT> rects)
+    {
+        var list = rects.ToList();
+        return new NativeMethods.RECT
+        {
+            Left = list.Min(r => r.Left), Top = list.Min(r => r.Top),
+            Right = list.Max(r => r.Right), Bottom = list.Max(r => r.Bottom),
+        };
+    }
+
+    private void OnWinViewFailed(string message)
+    {
+        if (!_winViewRunning) return;
+        if (_client.IsConnected) _client.Send(Frame.WinViewStop());
+        StopWinViewLocal();
+        SetWinViewStatus(message, Red);
+        Log(message);
+    }
+
+    private void StopWinView(bool notifyMac)
+    {
+        if (notifyMac && _winViewRequested && _client.IsConnected) _client.Send(Frame.WinViewStop());
+        _winViewRequested = false;
+        StopWinViewLocal();
+    }
+
+    /// <summary>Zatrzymuje strumień i odłącza monitor wirtualny (okna z niego wracają na monitory Windows).</summary>
+    private void StopWinViewLocal()
+    {
+        _winViewRunning = false;
+        _capture?.SetWinView(null, default);
+        _winTracker?.Stop();
+        _winTracker = null;
+        _winStreamer?.Stop();
+        WinViewStatsText = "";
+        if (!OperatingSystem.IsWindows()) return;
+        DisplayNative.ExcludedArea = null;
+        if (!_settings.WinViewAttached) return;
+        try
+        {
+            if (VirtualDisplayDriver.Find() is { Attached: true } monitor) VirtualDisplayDriver.Detach(monitor.DeviceName);
+            _settings.WinViewAttached = false;
+            SaveSettings();
+        }
+        catch (Exception ex)
+        {
+            Log(T("Nie udało się odłączyć monitora wirtualnego: ", "Could not detach the virtual monitor: ") + ex.Message);
+        }
+    }
+
+    /// <summary>Po awarii aplikacji monitor wirtualny mógł zostać podłączony – okna nie mogą na nim utknąć.</summary>
+    private void RecoverWinViewMonitor()
+    {
+        if (!OperatingSystem.IsWindows() || !_settings.WinViewAttached) return;
+        StopWinViewLocal();
+        _settings.WinViewAttached = false;
+        _settings.Save();
+    }
+
+    [RelayCommand]
+    private async Task InstallDisplayDriver()
+    {
+        if (!OperatingSystem.IsWindows() || IsInstallingDriver) return;
+        IsInstallingDriver = true;
+        SetWinViewStatus(T("Instalowanie sterownika (potwierdź w oknie Windows)…", "Installing the driver (confirm the Windows prompt)…"), Orange);
+        try
+        {
+            await VirtualDisplayDriver.InstallAsync();
+            // Nowy monitor Windows od razu podłącza – do czasu sesji ma być odłączony.
+            if (VirtualDisplayDriver.Find() is { Attached: true } monitor) VirtualDisplayDriver.Detach(monitor.DeviceName);
+            WinViewDriverMissing = false;
+            Log(T("Zainstalowano sterownik monitora wirtualnego.", "Installed the virtual monitor driver."));
+            SetWinViewStatus(T("Sterownik zainstalowany.", "Driver installed."), Green);
+            EvaluateWinView();
+        }
+        catch (Exception ex)
+        {
+            SetWinViewStatus(ex.Message, Red);
+            Log(T("Sterownik monitora wirtualnego: ", "Virtual monitor driver: ") + ex.Message);
+        }
+        finally
+        {
+            IsInstallingDriver = false;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1132,6 +1382,22 @@ public partial class MainViewModel : ObservableObject
         _viewer.SetVisible(_displayRunning && remote && (_displayFocus || ShowMacDisplayWhileRemote));
     }
 
+    private void UpdateWinViewStats()
+    {
+        if (!_winViewRunning || _winStreamer is null) return;
+        var seconds = _winViewStatsClock.Elapsed.TotalSeconds;
+        if (seconds < 1) return;
+        var bytes = _winStreamer.BytesSent;
+        var frames = _winStreamer.FramesSent;
+        var fps = (frames - _winViewStatsFrames) / seconds;
+        var mbps = (bytes - _winViewStatsBytes) * 8 / seconds / 1_000_000;
+        _winViewStatsFrames = frames;
+        _winViewStatsBytes = bytes;
+        _winViewStatsClock.Restart();
+        var conversion = _winStreamer.UsesGpu ? "GPU" : "CPU";
+        WinViewStatsText = T($"{fps:0} kl./s · {mbps:0.0} Mb/s · konwersja {conversion}", $"{fps:0} fps · {mbps:0.0} Mb/s · {conversion} conversion");
+    }
+
     private void UpdateDisplayStats()
     {
         if (!_displayRunning || _viewer is null) return;
@@ -1200,6 +1466,24 @@ public partial class MainViewModel : ObservableObject
         if (_capture is not null) _capture.Side = value.Value;
         // Inna strona = inny monitor i inna krawędź ekranu wirtualnego na Macu.
         if (!_loading && _displayRequested) RestartDisplay();
+        if (!_loading && _winViewRequested)
+        {
+            StopWinView(notifyMac: true);
+            EvaluateWinView();
+        }
+    }
+
+    partial void OnWinViewEnabledChanged(bool value)
+    {
+        _settings.WinViewEnabled = value;
+        SaveSettings();
+        if (_loading) return;
+        if (value) EvaluateWinView();
+        else
+        {
+            StopWinView(notifyMac: true);
+            SetWinViewStatus(T("Wyłączone w ustawieniach.", "Turned off in settings."), Gray);
+        }
     }
 
     partial void OnDisplayEnabledChanged(bool value)

@@ -18,6 +18,14 @@ Package versions are pinned in `windows/BorderlessMouse/packages.lock.json`.
 | Inter typeface (distributed through Avalonia.Fonts.Inter) | Copyright 2016 The Inter Project Authors | SIL Open Font License 1.1 |
 | Avalonia.Angle.Windows.Natives | Copyright 2018 The ANGLE Project Authors | BSD-style 3-Clause license reproduced below |
 
+Not bundled, downloaded on request by the Windows virtual monitor installer
+(checksums pinned in `windows/BorderlessMouse/Display/VirtualDisplayDriver.cs`):
+
+| Component | Copyright / author | License |
+|---|---|---|
+| Virtual Display Driver 25.7.23 (driver-only package) | Copyright (c) 2024 Virtual Display | MIT |
+| nefcon 1.14.0 | Copyright (c) 2022–2026 Nefarius Software Solutions e.U. | MIT |
+
 Release engineering must regenerate this inventory after every dependency
 upgrade. Apple system frameworks are used under the applicable Apple SDK
 agreements. Provenance and commercial-use records must be retained for every

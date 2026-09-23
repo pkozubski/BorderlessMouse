@@ -4,6 +4,7 @@ import CoreMedia
 import CoreVideo
 import Foundation
 import Network
+import ScreenCaptureKit
 import VideoToolbox
 
 /// Samotest ekranu wirtualnego bez Windowsa (`--display-selftest`):
@@ -137,6 +138,13 @@ enum DisplaySelfTest {
             check(perf.averageMs < 16, "koder mieści się w budżecie 60 kl./s")
         } catch {
             check(false, "pętla wideo: \(error.localizedDescription)")
+        }
+
+        // 3. Okna Windows na Macu: koder → szyfrowany TCP → WinViewSession → okno macOS
+        do {
+            try winViewLoopback(check: check)
+        } catch {
+            check(false, "okna Windows na Macu: \(error.localizedDescription)")
         }
 
         print(failures == 0 ? "WYNIK: OK" : "WYNIK: \(failures) błędów")
@@ -319,6 +327,117 @@ enum DisplaySelfTest {
         return (count > 0 ? total / Double(count) * 1000 : .infinity, keyframeBytes)
     }
 
+    /// Strumień „monitora Windows” 640×400 (górna połowa czerwona, dolna niebieska) trafia do
+    /// WinViewSession jak z Windowsa; okno Windows na środku monitora musi pokazać się na
+    /// ekranie Maca we właściwym miejscu, z obrazem we właściwej orientacji.
+    private static func winViewLoopback(check: (Bool, String) -> Void) throws {
+        let width = 640, height = 400
+        let key = VideoStream.randomBytes(VideoStream.keyBytes)
+        let token = VideoStream.randomBytes(VideoStream.tokenBytes)
+        let screen = CGDisplayBounds(CGMainDisplayID())
+        let session = WinViewSession(screen: screen, key: key, token: token)
+        var keyframeRequests = 0
+        session.onKeyframeNeeded = { keyframeRequests += 1 }
+        var port: UInt16?
+        var failure: Error?
+        session.start { result in
+            switch result {
+            case let .success(value): port = value
+            case let .failure(error): failure = error
+            }
+        }
+        func spin(_ seconds: Double, until done: () -> Bool = { false }) {
+            let end = Date().addingTimeInterval(seconds)
+            while Date() < end, !done() { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        }
+        spin(3) { port != nil || failure != nil }
+        if let failure { throw failure }
+        guard let port else { throw SelfTestError("odbiornik nie wystartował") }
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        client.start(queue: DispatchQueue(label: "selftest.winview"))
+        client.send(content: token, completion: .contentProcessed { _ in })
+        spin(1) { keyframeRequests > 0 }
+        check(keyframeRequests > 0, "odbiornik przyjął token i poprosił o klatkę kluczową")
+
+        let window = WinWindowDescriptor(id: 0x1234, x: 160, y: 100, width: 320, height: 200, flags: WinWindowDescriptor.foreground,
+                                         title: "Notatnik (test)")
+        session.update(WinWindowList(displayWidth: width, displayHeight: height, windows: [window]))
+        let inside = CGPoint(x: screen.minX + screen.width / 2, y: screen.minY + screen.height / 2)
+        let hit = session.hitTest(inside)
+        check(hit.map { abs(Int($0.x) - 320) <= 1 && abs(Int($0.y) - 200) <= 1 } == true,
+              "środek ekranu Maca trafia w okno Windows (piksel \(hit.map { "\($0.x),\($0.y)" } ?? "brak"))")
+        check(session.hitTest(CGPoint(x: screen.minX + 5, y: screen.minY + 5)) == nil, "róg ekranu poza oknem Windows")
+        let back = session.macPoint(x: 320, y: 200)
+        check(abs(back.x - inside.x) < 2 && abs(back.y - inside.y) < 2, "piksel monitora Windows → punkt Maca (\(back))")
+
+        let encoder = try VideoEncoder(width: width, height: height)
+        var sealer = VideoStream.Sealer(key: key)
+        let sent = DispatchSemaphore(value: 0)
+        encoder.onFrame = { encoded in
+            let frame = VideoStream.Frame(kind: .h264AccessUnit, flags: encoded.isKeyframe ? [.keyframe] : [],
+                                          width: width, height: height, captureMicros: 0, payload: encoded.annexB)
+            if let record = sealer.seal(frame.encoded()) {
+                client.send(content: record, completion: .contentProcessed { _ in sent.signal() })
+            }
+        }
+        let top = Color(r: 220, g: 30, b: 30), bottom = Color(r: 40, g: 60, b: 230)
+        let image = try makeFrame(width: width, height: height, color: top, bottomColor: bottom)
+        for index in 0..<3 {
+            encoder.encode(image, presentationTime: CMTime(value: CMTimeValue(index), timescale: 60))
+            _ = sent.wait(timeout: .now() + 2)
+        }
+        spin(1.5)
+        encoder.invalidate()
+
+        let stats = session.stats
+        check(stats.frames >= 3, "okna Windows: odebrano \(stats.frames) klatek (\(stats.bytes) B)")
+        guard let number = session.proxyWindowNumber(window.id) else {
+            check(false, "okno macOS dla okna Windows nie powstało")
+            session.stop()
+            return
+        }
+        if DisplayCapture.hasPermission {
+            var shot: CGImage?
+            var done = false
+            Task {
+                defer { done = true }
+                guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+                      let scWindow = content.windows.first(where: { $0.windowID == CGWindowID(number) }) else { return }
+                let config = SCStreamConfiguration()
+                config.width = 320
+                config.height = 200
+                config.showsCursor = false
+                if #available(macOS 14.0, *) { config.ignoreShadowsSingleWindow = true }
+                shot = try? await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: scWindow),
+                                                                   configuration: config)
+            }
+            spin(5) { done }
+            if let shot, let upper = pixel(shot, x: 160, y: 30), let lower = pixel(shot, x: 160, y: 170) {
+                check(upper.near(top, tolerance: 40) && lower.near(bottom, tolerance: 40),
+                      "obraz w oknie macOS: góra \(upper), dół \(lower) (oczekiwano \(top) / \(bottom))")
+            } else {
+                check(false, "zrzut okna macOS z oknem Windows")
+            }
+        } else {
+            print("– pominięto zrzut okna: brak zgody „Nagrywanie ekranu” dla tego procesu")
+        }
+        client.cancel()
+        session.stop()
+        spin(0.2)
+    }
+
+    private static func pixel(_ image: CGImage, x: Int, y: Int) -> Color? {
+        guard let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+                                      bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard let data = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        let px = x * image.width / 320, py = y * image.height / 200
+        let p = data + py * image.width * 4 + px * 4
+        return Color(r: p[0], g: p[1], b: p[2])
+    }
+
     // MARK: - Fixture dla Windows
 
     /// Mały strumień 160×96 (czerwony, zielony, niebieski) zaszyfrowany znanym
@@ -365,33 +484,37 @@ enum DisplaySelfTest {
     }
 
     /// Klatka NV12 (zakres wideo, BT.709) w jednolitym kolorze, opcjonalnie z pasem.
-    static func makeFrame(width: Int, height: Int, color: Color, stripe: Int? = nil) throws -> CVPixelBuffer {
+    static func makeFrame(width: Int, height: Int, color: Color, stripe: Int? = nil, bottomColor: Color? = nil) throws -> CVPixelBuffer {
         var buffer: CVPixelBuffer?
         let attributes = [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
         guard CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
                                   attributes, &buffer) == kCVReturnSuccess, let buffer else {
             throw SelfTestError("CVPixelBufferCreate")
         }
-        let r = Double(color.r) / 255, g = Double(color.g) / 255, b = Double(color.b) / 255
-        let yf = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        let y = UInt8(clamping: Int((16 + 219 * yf).rounded()))
-        let cb = UInt8(clamping: Int((128 + 224 * (b - yf) / 1.8556).rounded()))
-        let cr = UInt8(clamping: Int((128 + 224 * (r - yf) / 1.5748).rounded()))
+        func ycbcr(_ color: Color) -> (y: UInt8, cb: UInt8, cr: UInt8) {
+            let r = Double(color.r) / 255, g = Double(color.g) / 255, b = Double(color.b) / 255
+            let yf = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            return (UInt8(clamping: Int((16 + 219 * yf).rounded())),
+                    UInt8(clamping: Int((128 + 224 * (b - yf) / 1.8556).rounded())),
+                    UInt8(clamping: Int((128 + 224 * (r - yf) / 1.5748).rounded())))
+        }
+        let upper = ycbcr(color), lower = ycbcr(bottomColor ?? color)
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         let yPlane = CVPixelBufferGetBaseAddressOfPlane(buffer, 0)!.assumingMemoryBound(to: UInt8.self)
         let yStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
         for row in 0..<height {
-            memset(yPlane + row * yStride, Int32(y), width)
+            memset(yPlane + row * yStride, Int32(row < height / 2 ? upper.y : lower.y), width)
             if let stripe, (row / 32) % 4 == stripe { memset(yPlane + row * yStride, 235, width / 3) }
         }
         let uvPlane = CVPixelBufferGetBaseAddressOfPlane(buffer, 1)!.assumingMemoryBound(to: UInt8.self)
         let uvStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)
         for row in 0..<(height / 2) {
             let line = uvPlane + row * uvStride
+            let value = row < height / 4 ? upper : lower
             for column in 0..<(width / 2) {
-                line[column * 2] = cb
-                line[column * 2 + 1] = cr
+                line[column * 2] = value.cb
+                line[column * 2 + 1] = value.cr
             }
         }
         CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
