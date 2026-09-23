@@ -245,9 +245,10 @@ final class WindowStreams {
             }
         }
 
-        /// H.264 wymaga wymiarów parzystych, a sprzętowe kodery minimum ~64 px –
-        /// mniejsze okna (podpowiedzi) leżą w lewym górnym rogu większej klatki.
-        static func encodedSize(_ value: Int) -> Int { max(64, (value + 1) & ~1) }
+        /// H.264 wymaga wymiarów parzystych. Nie dopełniamy więcej niż trzeba: ScreenCaptureKit
+        /// nie gwarantuje, w którym miejscu większej klatki położy obraz (pasek menu 30 px
+        /// w klatce 64 px wychodził ucięty). VideoToolbox koduje nawet 2×2 px.
+        static func encodedSize(_ value: Int) -> Int { max(16, (value + 1) & ~1) }
 
         static func bitrate(width: Int, height: Int) -> Int {
             Int(min(max(Double(width * height) * 60 * 0.1, 1_000_000), 40_000_000))

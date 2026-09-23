@@ -148,8 +148,8 @@ u64 captureMicros   // tylko diagnostyka
 H.264 Annex B
 ```
 
-Strumień okna ma rozmiar okna w pikselach, dopełniony do parzystych wymiarów i co
-najmniej 64×64 (okno leży w lewym górnym rogu klatki).
+Strumień okna ma rozmiar okna w pikselach, zaokrąglony w górę do parzystych wymiarów
+(co najmniej 16×16).
 
 Rekord ma najwyżej 16 MiB. ScreenCaptureKit nie dostarcza klatek, gdy ekran się nie
 zmienia, więc nieruchomy obraz nie generuje ruchu. Gdy sieć nie nadąża, Mac odrzuca klatki

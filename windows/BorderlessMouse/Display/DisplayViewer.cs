@@ -266,8 +266,8 @@ public sealed class DisplayViewer : IDisposable
             return;
         }
         DisposeDecoder(surface);
-        // Małe okna są dopełniane do 64 px po stronie Maca (minimum sprzętowego kodera).
-        surface.Decoder = new H264Decoder(_device, Math.Max(64, (frame.Width + 1) & ~1), Math.Max(64, (frame.Height + 1) & ~1));
+        // Mac koduje wymiary parzyste, najmniej 16 px.
+        surface.Decoder = new H264Decoder(_device, Math.Max(16, (frame.Width + 1) & ~1), Math.Max(16, (frame.Height + 1) & ~1));
         surface.DecoderWidth = frame.Width;
         surface.DecoderHeight = frame.Height;
         UsesGpuDecoding = surface.Decoder.UsesGpu;
