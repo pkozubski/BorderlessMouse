@@ -123,6 +123,12 @@ public sealed class WinViewStreamer : IDisposable
         {
             if (_running) failure = T("Strumień okien: ", "Window stream: ") + (ex.InnerException ?? ex).Message;
         }
+        catch (Exception ex)
+        {
+            // Nieoczekiwany błąd kończy strumień (z opisem w Dzienniku), a nie całą aplikację.
+            CrashLog.Write(ex);
+            if (_running) failure = T("Strumień okien – nieoczekiwany błąd: ", "Window stream — unexpected error: ") + ex.GetType().Name + ": " + ex.Message;
+        }
         finally
         {
             encoder?.Dispose();

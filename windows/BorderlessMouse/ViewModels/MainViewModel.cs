@@ -145,6 +145,14 @@ public partial class MainViewModel : ObservableObject
         _videoRx.Closed += reason => Post(() => OnDisplayFailed(reason ?? T("Strumień ekranu zakończony.", "The display stream ended.")));
 
         RecoverWinViewMonitor();
+        if (CrashLog.TakePrevious() is { } crash)
+        {
+            // Pierwsze linie wystarczą do zgłoszenia; całość jest w crash-previous.log.
+            var lines = crash.Split('\n').Take(12).Select(l => l.TrimEnd());
+            Log(T("Poprzednie uruchomienie zakończyło się awarią (%LOCALAPPDATA%\\BorderlessMouse\\crash-previous.log):\n",
+                "The previous run crashed (%LOCALAPPDATA%\\BorderlessMouse\\crash-previous.log):\n") + string.Join("\n", lines));
+        }
+        Log(T($"Wersja {Updater.CurrentVersion}", $"Version {Updater.CurrentVersion}") + (Updater.IsDevChannel ? T(" (kanał testowy)", " (test channel)") : ""));
         _statsTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) => UpdateStats());
         _loading = false;
         UpdateStatus();
@@ -345,7 +353,10 @@ public partial class MainViewModel : ObservableObject
                 UpdateStatusText = T($"Dostępna wersja {release.Version} · {release.PageUrl}", $"Version {release.Version} available · {release.PageUrl}");
                 Log(T($"Dostępna aktualizacja {release.Version}", $"Update {release.Version} is available"));
                 // Kanał testowy: od razu, ale nie gdy kursor jest na Macu (restart zabrałby sterowanie).
-                if (Updater.IsDevChannel && !CursorOnMac) _ = InstallUpdate();
+                if (Updater.IsDevChannel && !CursorOnMac && _winTracker?.HasWindows != true && NativeMethods.IdleTime() >= TimeSpan.FromSeconds(60))
+                    _ = InstallUpdate();
+                else if (Updater.IsDevChannel)
+                    UpdateStatusText += T(" · zainstaluje się po minucie bezczynności", " · installs after a minute of inactivity");
             }
             else
             {

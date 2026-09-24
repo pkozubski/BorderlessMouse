@@ -51,6 +51,9 @@ public sealed class WinViewTracker : IDisposable
 
     public NativeMethods.RECT Monitor => _monitor;
 
+    /// <summary>Jakieś okno Windows jest teraz na Macu.</summary>
+    public bool HasWindows => _rects.Length > 0;
+
     /// <summary>Czy punkt ekranu leży w którymś oknie widocznym na Macu.</summary>
     public bool WindowAt(NativeMethods.POINT point)
     {
@@ -98,9 +101,11 @@ public sealed class WinViewTracker : IDisposable
                 PollWindows();
                 PollCursor();
             }
-            catch (Exception ex) when (ex is ExternalException or InvalidOperationException)
+            catch (Exception ex)
             {
-                // pojedynczy nieudany odczyt nie przerywa śledzenia
+                // Pojedynczy nieudany odczyt nie przerywa śledzenia – i nie może zamknąć aplikacji.
+                CrashLog.Write(ex);
+                Thread.Sleep(500);
             }
             Thread.Sleep(16);
         }
@@ -135,6 +140,20 @@ public sealed class WinViewTracker : IDisposable
         var title = new StringBuilder(256);
         EnumWindows((hwnd, _) =>
         {
+            try
+            {
+                return Visit(hwnd);
+            }
+            catch
+            {
+                // wyjątek nie może przejść przez natywne wywołanie zwrotne (zamknąłby proces)
+                return true;
+            }
+        }, IntPtr.Zero);
+        return list;
+
+        bool Visit(IntPtr hwnd)
+        {
             if (list.Count >= 64) return false;
             if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
             if (DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
@@ -158,12 +177,12 @@ public sealed class WinViewTracker : IDisposable
             if (hwnd == foreground) flags |= WinWindow.Foreground;
             if (popup) flags |= WinWindow.Popup;
             title.Clear();
-            GetWindowTextW(hwnd, title, title.Capacity);
+            // InternalGetWindowText nie wysyła komunikatu do aplikacji (zajęta aplikacja nas nie zablokuje).
+            InternalGetWindowText(hwnd, title, title.Capacity);
             list.Add(new WinWindow(unchecked((uint)(long)hwnd), bounds.Left - _monitor.Left, bounds.Top - _monitor.Top,
                 bounds.Width, bounds.Height, flags, title.ToString()));
             return true;
-        }, IntPtr.Zero);
-        return list;
+        }
     }
 
     private void PollCursor()
@@ -238,7 +257,7 @@ public sealed class WinViewTracker : IDisposable
     private static extern int GetClassNameW(IntPtr hwnd, StringBuilder name, int capacity);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetWindowTextW(IntPtr hwnd, StringBuilder text, int capacity);
+    private static extern int InternalGetWindowText(IntPtr hwnd, StringBuilder text, int capacity);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindowLongPtrW(IntPtr hwnd, int index);

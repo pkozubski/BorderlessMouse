@@ -271,6 +271,24 @@ public static class NativeMethods
     [DllImport("user32.dll")]
     public static extern uint GetClipboardSequenceNumber();
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+
+    /// <summary>Czas od ostatniego użycia klawiatury lub myszy (także przekazywanego do Maca).</summary>
+    public static TimeSpan IdleTime()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        return GetLastInputInfo(ref info) ? TimeSpan.FromMilliseconds(unchecked((uint)Environment.TickCount - info.dwTime)) : TimeSpan.Zero;
+    }
+
     public static RECT MonitorRectAt(POINT pt)
     {
         var mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
