@@ -91,8 +91,9 @@ musi rosnąć ściśle; powtórzenie, przestawienie lub modyfikacja kończy sesj
 | 0x93 | WINVIEW_KEYFRAME | M → W | – |
 | 0x94 | WINVIEW_WINDOWS | W → M | `u16 displayWidth`, `u16 displayHeight`, `u8 count`, `count ×` (`u32 id`, `i32 x`, `i32 y`, `u16 w`, `u16 h`, `u8 flags`, `u8 titleLength`, tytuł UTF-8); piksele monitora wirtualnego Windows, od najwyższego; flagi: bit 0 aktywne, bit 1 menu/podpowiedź |
 | 0x95 | WINVIEW_POINTER_ENTER | M → W | `u16 x`, `u16 y` – kursor sterowany z Windowsa wjechał na okno Windows pokazane na Macu (piksele monitora wirtualnego) |
-| 0x96 | WINVIEW_CURSOR | W → M | `u16 x`, `u16 y`, `u8 shape` (jak `CURSOR_SHAPE`), `u8 visible` – kursor Windows na monitorze wirtualnym |
+| 0x96 | WINVIEW_CURSOR | W → M | `u16 x`, `u16 y`, `u8 shape` (jak `CURSOR_SHAPE`), `u8 flags` (bit 0 widoczny, bit 1 wciśnięty przycisk) – kursor Windows na monitorze wirtualnym |
 | 0x97 | WINVIEW_POINTER_LEAVE | W → M | `u16 x`, `u16 y` – kursor zszedł z okien Windows; Mac przejmuje sterowanie w tym punkcie |
+| 0x98 | WINVIEW_POINTER_RELEASE | M → W | `u16 x`, `u16 y` – w tym miejscu okno Windows na Macu jest zasłonięte (albo go nie ma); Windows oddaje sterowanie jak przy `WINVIEW_POINTER_LEAVE` |
 | 0x88 | WINDOW_MENU | M → W | `i32 pid`, lista pozycji: `u16 count`, dla każdej `u8 flags` (bit 0 aktywna, 1 separator, 2 zaznaczona, 3 podmenu), `u8 len` + tytuł, `u8 len` + skrót, przy podmenu zagnieżdżona lista; pozycje numerowane w kolejności przeglądania od 0 |
 
 Flagi `STATUS`: bit 0 Dostępność, bit 1 przechwytywanie audio, bit 2 kursor na Macu,
@@ -218,8 +219,10 @@ czas sesji, przy krawędzi po stronie Maca, i odłącza po niej (okna wracają n
    `WINVIEW_READY` z portem, losowym kluczem i tokenem oraz rozmiarem tego ekranu w punktach.
 3. Windows ustawia monitor wirtualny na ten rozmiar (dopisuje go do konfiguracji sterownika,
    jeśli trzeba), podłącza się do portu, wysyła token i dalej wysyła rekordy w formacie
-   strumienia ekranu (`kind = 1`, cały monitor wirtualny; H.264 bez klatek B, SPS/PPS przed
-   każdą klatką kluczową, BT.709, zakres 16–235). Obraz nagrywa DXGI Desktop Duplication, więc
+   strumienia ekranu (`kind = 3`: nagłówek jak `kind = 1`, potem `u32 length` i treść
+   `WINVIEW_WINDOWS` z chwili nagrania klatki, potem H.264 bez klatek B, SPS/PPS przed każdą
+   klatką kluczową, BT.709, zakres 16–235). Mac przesuwa okna razem z obrazem, więc okno nie
+   wyprzedza swojej zawartości; lista z kanału sterowania służy wtedy tylko do trafiania kursorem. Obraz nagrywa DXGI Desktop Duplication, więc
    nieruchomy monitor nie generuje ruchu. Mac prosi o klatkę kluczową przez `WINVIEW_KEYFRAME`.
 4. Okna leżące na monitorze wirtualnym (`WINVIEW_WINDOWS`) Mac pokazuje jako własne okna w tym
    samym miejscu swojego ekranu; każde przycina wspólny obraz do swojego prostokąta.
@@ -235,8 +238,12 @@ Wejście:
 * Gdy kursor zejdzie z okien Windows (bez wciśniętego przycisku), Windows wysyła
   `WINVIEW_POINTER_LEAVE` i od tego punktu steruje Makiem jak po `ENTER`. Klawiatura zostaje
   w aktywnym oknie Windows do pierwszego kliknięcia na Macu.
-* Kursor sterowany z Windowsa, który na Macu wjedzie na okno Windows, powoduje
-  `WINVIEW_POINTER_ENTER` – Windows przejmuje kursor w tym punkcie monitora wirtualnego.
+* Kursor sterowany z Windowsa, który na Macu wjedzie na widoczne (niezasłonięte) okno Windows,
+  powoduje `WINVIEW_POINTER_ENTER` – Windows przejmuje kursor w tym punkcie monitora wirtualnego.
+* Gdy kursor Windows (bez wciśniętego przycisku) stoi w miejscu, gdzie okno Windows na Macu jest
+  zasłonięte przez okno Maca, Mac wysyła `WINVIEW_POINTER_RELEASE`.
+* Dopóki na Macu są okna Windows, aplikacja ma ikonę w Docku i w Cmd+Tab; aktywacja wyciąga
+  te okna na wierzch.
 
 ## Granice zaufania
 

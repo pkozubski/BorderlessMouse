@@ -14,6 +14,8 @@ final class WinViewSession {
     /// Poproszenie Windowsa o klatkę kluczową (błąd dekodera). Dowolny wątek.
     var onKeyframeNeeded: (() -> Void)?
     var onClosed: ((String?) -> Void)?
+    /// Kursor Windows jest w miejscu, gdzie okna Windows na Macu nie widać – Windows ma go oddać.
+    var onPointerRelease: ((UInt16, UInt16) -> Void)?
 
     private let receiver: WinViewReceiver
     private let decodeQueue = DispatchQueue(label: "blm.winview.decode", qos: .userInteractive)
@@ -26,6 +28,12 @@ final class WinViewSession {
     private let lock = NSLock()
     private var hitRects: [CGRect] = []
     private var displaySize = CGSize(width: 1, height: 1)
+    /// Numery okien macOS pokazujących okna Windows (do sprawdzania, czy nie są zasłonięte).
+    private var proxyNumbers: Set<Int> = []
+    /// Klatki niosą własną listę okien – lista z kanału sterowania służy już tylko do trafiania.
+    private var framesCarryWindows = false
+    private var lastRelease = Date.distantPast
+    private let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
 
     init(screen: CGRect, key: Data, token: Data) {
         self.screen = screen
@@ -36,6 +44,10 @@ final class WinViewSession {
         receiver.onFrame = { [weak self] frame in self?.decode(frame) }
         receiver.onClosed = { [weak self] reason in self?.onClosed?(reason) }
         receiver.onConnected = { [weak self] in self?.onKeyframeNeeded?() }
+        proxies.onNumbersChanged = { [weak self] numbers in
+            guard let self else { return }
+            self.lock.withLock { self.proxyNumbers = numbers }
+        }
         receiver.start(completion: completion)
     }
 
@@ -56,23 +68,37 @@ final class WinViewSession {
     func update(_ list: WinWindowList) {
         let rects = list.windows.map { CGRect(x: CGFloat($0.x), y: CGFloat($0.y), width: CGFloat($0.width), height: CGFloat($0.height)) }
         let size = CGSize(width: list.displayWidth, height: list.displayHeight)
-        lock.withLock {
+        let proxiesFollow = lock.withLock {
             hitRects = rects
             displaySize = size
+            return !framesCarryWindows
         }
+        // Położenie okien macOS zmienia się razem z obrazem (lista w klatce), inaczej
+        // okno wyprzedza swoją zawartość i w szczelinie widać tapetę monitora Windows.
+        guard proxiesFollow else { return }
         let screen = self.screen
         DispatchQueue.main.async { [proxies] in proxies.update(list, screen: screen) }
     }
 
+    /// Okno Windows na Macu w tym punkcie jest widoczne (nie zasłania go okno innej aplikacji).
+    private func proxyVisible(at point: CGPoint) -> Bool {
+        let numbers = lock.withLock { proxyNumbers }
+        guard !numbers.isEmpty else { return false }
+        let number = NSWindow.windowNumber(at: NSPoint(x: point.x, y: primaryHeight - point.y), belowWindowWithWindowNumber: 0)
+        return numbers.contains(number)
+    }
+
     /// Punkt ekranu Maca (globalne CG) → piksel monitora Windows, jeśli leży w którymś oknie Windows.
     func hitTest(_ point: CGPoint) -> (x: UInt16, y: UInt16)? {
-        lock.withLock {
+        let hit: (x: UInt16, y: UInt16)? = lock.withLock {
             guard !hitRects.isEmpty, screen.contains(point) else { return nil }
             let px = CGPoint(x: (point.x - screen.minX) * displaySize.width / screen.width,
                              y: (point.y - screen.minY) * displaySize.height / screen.height)
             guard hitRects.contains(where: { $0.contains(px) }) else { return nil }
             return (UInt16(clamping: Int(px.x.rounded(.down))), UInt16(clamping: Int(px.y.rounded(.down))))
         }
+        guard let hit, proxyVisible(at: point) else { return nil }
+        return hit
     }
 
     /// Piksel monitora Windows → punkt ekranu Maca (globalne CG).
@@ -86,6 +112,12 @@ final class WinViewSession {
     /// Kursor Windows jest na wirtualnym monitorze: pokazujemy kursor Maca w tym miejscu.
     func cursor(_ update: WinCursorUpdate) {
         let point = macPoint(x: update.x, y: update.y)
+        if !update.buttons, !proxyVisible(at: point), Date().timeIntervalSince(lastRelease) > 0.3 {
+            // Okno Windows jest tu zasłonięte przez okno Maca – kursor nie może zostać na
+            // niewidocznym monitorze Windows.
+            lastRelease = Date()
+            onPointerRelease?(update.x, update.y)
+        }
         DispatchQueue.main.async {
             CGWarpMouseCursorPosition(point)
             WinViewSession.cursor(for: update.shape).set()
@@ -132,7 +164,17 @@ final class WinViewSession {
             do {
                 guard let image = try self.decoder.decode(frame.payload) else { return }
                 self.awaitingKeyframe = false
-                DispatchQueue.main.async { [proxies] in proxies.show(image) }
+                let list = frame.windows.flatMap(WinWindowList.init(payload:))
+                if list != nil { self.lock.withLock { self.framesCarryWindows = true } }
+                let screen = self.screen
+                DispatchQueue.main.async { [proxies] in
+                    // Obraz i położenie okien z tej samej chwili – w jednej transakcji.
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    if let list { proxies.update(list, screen: screen) }
+                    proxies.show(image)
+                    CATransaction.commit()
+                }
             } catch {
                 self.awaitingKeyframe = true
                 self.requestKeyframe()
@@ -186,6 +228,34 @@ final class WinWindowProxies {
     private var surface: IOSurfaceRef?
     private var buffer: CVPixelBuffer?
     private var foreground: UInt32?
+    /// Wywoływane po zmianie zbioru okien (wątek główny).
+    var onNumbersChanged: ((Set<Int>) -> Void)?
+    /// Aplikacja była tylko w pasku menu – dopóki są okna Windows, ma ikonę w Docku i w Cmd+Tab.
+    private var promotedToRegular = false
+    private var activationObserver: NSObjectProtocol?
+
+    init() {
+        // Kliknięcie ikony w Docku / Cmd+Tab wyciąga okna Windows spod okien innych aplikacji.
+        activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                                                    object: nil, queue: .main) { [weak self] _ in
+            self?.bringToFront()
+        }
+    }
+
+    deinit {
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+    }
+
+    private func publishNumbers() {
+        onNumbersChanged?(Set(proxies.values.filter { $0.window.isVisible }.map(\.window.windowNumber)))
+        if !proxies.isEmpty, NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+            promotedToRegular = true
+        } else if proxies.isEmpty, promotedToRegular {
+            promotedToRegular = false
+            if !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) { NSApp.setActivationPolicy(.accessory) }
+        }
+    }
 
     func update(_ list: WinWindowList, screen: CGRect) {
         self.screen = screen
@@ -217,6 +287,7 @@ final class WinWindowProxies {
             restack(bringToFront: created || newForeground != foreground)
         }
         foreground = newForeground
+        publishNumbers()
     }
 
     func bringToFront() { restack(bringToFront: true) }
@@ -240,6 +311,7 @@ final class WinWindowProxies {
         surface = nil
         buffer = nil
         foreground = nil
+        publishNumbers()
     }
 
     private func restack(bringToFront: Bool) {

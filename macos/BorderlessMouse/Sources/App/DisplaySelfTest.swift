@@ -362,21 +362,16 @@ enum DisplaySelfTest {
 
         let window = WinWindowDescriptor(id: 0x1234, x: 160, y: 100, width: 320, height: 200, flags: WinWindowDescriptor.foreground,
                                          title: "Notatnik (test)")
-        session.update(WinWindowList(displayWidth: width, displayHeight: height, windows: [window]))
-        let inside = CGPoint(x: screen.minX + screen.width / 2, y: screen.minY + screen.height / 2)
-        let hit = session.hitTest(inside)
-        check(hit.map { abs(Int($0.x) - 320) <= 1 && abs(Int($0.y) - 200) <= 1 } == true,
-              "środek ekranu Maca trafia w okno Windows (piksel \(hit.map { "\($0.x),\($0.y)" } ?? "brak"))")
-        check(session.hitTest(CGPoint(x: screen.minX + 5, y: screen.minY + 5)) == nil, "róg ekranu poza oknem Windows")
-        let back = session.macPoint(x: 320, y: 200)
-        check(abs(back.x - inside.x) < 2 && abs(back.y - inside.y) < 2, "piksel monitora Windows → punkt Maca (\(back))")
-
+        let list = WinWindowList(displayWidth: width, displayHeight: height, windows: [window])
+        session.update(list)
         let encoder = try VideoEncoder(width: width, height: height)
         var sealer = VideoStream.Sealer(key: key)
         let sent = DispatchSemaphore(value: 0)
         encoder.onFrame = { encoded in
-            let frame = VideoStream.Frame(kind: .h264AccessUnit, flags: encoded.isKeyframe ? [.keyframe] : [],
-                                          width: width, height: height, captureMicros: 0, payload: encoded.annexB)
+            // Klatka z listą okien z tej samej chwili (kind 3), tak jak wysyła Windows.
+            let frame = VideoStream.Frame(kind: .winViewAccessUnit, flags: encoded.isKeyframe ? [.keyframe] : [],
+                                          width: width, height: height, captureMicros: 0, payload: encoded.annexB,
+                                          windows: list.payload)
             if let record = sealer.seal(frame.encoded()) {
                 client.send(content: record, completion: .contentProcessed { _ in sent.signal() })
             }
@@ -389,6 +384,22 @@ enum DisplaySelfTest {
         }
         spin(1.5)
         encoder.invalidate()
+
+        let inside = CGPoint(x: screen.minX + screen.width / 2, y: screen.minY + screen.height / 2)
+        let hit = session.hitTest(inside)
+        check(hit.map { abs(Int($0.x) - 320) <= 1 && abs(Int($0.y) - 200) <= 1 } == true,
+              "środek ekranu Maca trafia w widoczne okno Windows (piksel \(hit.map { "\($0.x),\($0.y)" } ?? "brak"))")
+        check(session.hitTest(CGPoint(x: screen.minX + 5, y: screen.minY + 5)) == nil, "róg ekranu poza oknem Windows")
+        let back = session.macPoint(x: 320, y: 200)
+        check(abs(back.x - inside.x) < 2 && abs(back.y - inside.y) < 2, "piksel monitora Windows → punkt Maca (\(back))")
+        var released: (UInt16, UInt16)?
+        session.onPointerRelease = { x, y in released = (x, y) }
+        session.cursor(WinCursorUpdate(x: 5, y: 5, shape: 0, visible: true))
+        check(released != nil, "kursor Windows poza widocznym oknem – Mac prosi o oddanie sterowania")
+        released = nil
+        session.cursor(WinCursorUpdate(x: 20, y: 20, shape: 0, visible: true, buttons: true))
+        check(released == nil, "podczas przeciągania Mac nie zabiera kursora")
+        spin(0.1)
 
         let stats = session.stats
         check(stats.frames >= 3, "okna Windows: odebrano \(stats.frames) klatek (\(stats.bytes) B)")

@@ -23,6 +23,8 @@ public static class VideoStream
 
     public const byte KindH264AccessUnit = 1;
     public const byte KindWindowAccessUnit = 2;
+    /// <summary>Cały monitor wirtualny Windows + lista okien z tej samej chwili (okna Windows na Macu).</summary>
+    public const byte KindWinViewAccessUnit = 3;
     /// <summary>Strumień paska menu ekranu wirtualnego (tryb okien).</summary>
     public const uint MenuBarStreamId = 0xFFFF_FFFE;
     public const byte FlagKeyframe = 0x01;
@@ -82,16 +84,26 @@ public static class VideoStream
         return record;
     }
 
-    /// <summary>Kind 1 (cały monitor): nagłówek klatki + Annex B – tekst jawny rekordu.</summary>
-    public static byte[] EncodeFrame(bool keyframe, int width, int height, ulong captureMicros, ReadOnlySpan<byte> annexB)
+    /// <summary>
+    /// Tekst jawny rekordu: kind 1 (cały monitor) albo – z <paramref name="windows"/> – kind 3:
+    /// po nagłówku <c>u32 length</c> + treść WINVIEW_WINDOWS, potem Annex B.
+    /// </summary>
+    public static byte[] EncodeFrame(bool keyframe, int width, int height, ulong captureMicros, ReadOnlySpan<byte> annexB,
+        byte[]? windows = null)
     {
-        var clear = new byte[FrameHeaderBytes + annexB.Length];
-        clear[0] = KindH264AccessUnit;
+        var extra = windows is null ? 0 : 4 + windows.Length;
+        var clear = new byte[FrameHeaderBytes + extra + annexB.Length];
+        clear[0] = windows is null ? KindH264AccessUnit : KindWinViewAccessUnit;
         clear[1] = keyframe ? FlagKeyframe : (byte)0;
         BinaryPrimitives.WriteUInt16LittleEndian(clear.AsSpan(2), (ushort)width);
         BinaryPrimitives.WriteUInt16LittleEndian(clear.AsSpan(4), (ushort)height);
         BinaryPrimitives.WriteUInt64LittleEndian(clear.AsSpan(6), captureMicros);
-        annexB.CopyTo(clear.AsSpan(FrameHeaderBytes));
+        if (windows is not null)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(clear.AsSpan(FrameHeaderBytes), (uint)windows.Length);
+            windows.CopyTo(clear, FrameHeaderBytes + 4);
+        }
+        annexB.CopyTo(clear.AsSpan(FrameHeaderBytes + extra));
         return clear;
     }
 

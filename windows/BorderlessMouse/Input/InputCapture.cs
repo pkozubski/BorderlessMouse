@@ -260,6 +260,17 @@ public sealed class InputCapture : IDisposable
         _vddGraceUntil = DateTime.UtcNow.AddMilliseconds(300);
     }
 
+    /// <summary>
+    /// Mac: w tym miejscu okno Windows jest zasłonięte (albo go nie ma) – kursor wraca na Maca,
+    /// zamiast błąkać się po niewidocznym monitorze.
+    /// </summary>
+    public void ReleaseWinView()
+    {
+        if (_winView is not { } view || !_onVdd || IsRemote || _localButtons > 0) return;
+        GetCursorPos(out var pt);
+        if (view.Contains(pt)) LeaveWinViewToMac(view, pt);
+    }
+
     private void TrackLocalButtons(int msg)
     {
         if (IsButtonDown(msg)) _localButtons++;

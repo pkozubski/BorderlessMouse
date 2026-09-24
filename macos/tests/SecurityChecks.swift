@@ -111,6 +111,12 @@ struct SecurityChecks {
         expect(Frame.winViewPointerEnter(x: 0x1234, y: 0xFFFF) == data("95043412ffff") && Frame.winViewKeyframe() == data("9300"),
                "WINVIEW pointer enter and keyframe layouts")
         expect(StatusFlags.winViewSupported.rawValue == 0x80, "WINVIEW status bit")
+        let winFrame = VideoStream.Frame(kind: .winViewAccessUnit, flags: [.keyframe], width: 800, height: 600, captureMicros: 5,
+                                         payload: Data([0, 0, 0, 1, 0x65]), windows: [1, 2, 3])
+        expect(winFrame.encoded() == data("0301200358020500000000000000030000000102030000000165") && VideoStream.Frame(decoding: winFrame.encoded()) == winFrame,
+               "WINVIEW frame with window list (shared with Windows)")
+        expect(WinCursorUpdate(payload: Array(data("2c01c8000103")))?.buttons == true, "WINVIEW_CURSOR buttons flag")
+        expect(Frame.winViewPointerRelease(x: 0x1234, y: 5) == data("980434120500"), "WINVIEW_POINTER_RELEASE layout")
 
         var badCodec = request.payload
         badCodec[7] = 9

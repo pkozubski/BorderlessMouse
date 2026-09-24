@@ -25,6 +25,8 @@ enum VideoStream {
         case h264AccessUnit = 1
         /// Jedno okno Maca (osobny strumień H.264 na okno).
         case windowAccessUnit = 2
+        /// Cały monitor wirtualny Windows + lista okien z tej samej chwili (`u32 length` + WINVIEW_WINDOWS).
+        case winViewAccessUnit = 3
     }
 
     struct FrameFlags: OptionSet {
@@ -42,6 +44,8 @@ enum VideoStream {
         /// Tylko `windowAccessUnit`: identyfikator okna (CGWindowID) albo paska menu.
         let streamID: UInt32
         let cornerRadius: UInt16
+        /// Tylko `winViewAccessUnit`: treść WINVIEW_WINDOWS zsynchronizowana z obrazem.
+        let windows: [UInt8]?
 
         var isKeyframe: Bool { flags.contains(.keyframe) }
 
@@ -56,13 +60,18 @@ enum VideoStream {
                 w.u32(streamID)
                 w.u16(cornerRadius)
             }
+            if kind == .winViewAccessUnit {
+                let list = windows ?? []
+                w.u32(UInt32(list.count))
+                w.raw(list)
+            }
             var data = Data(w.bytes)
             data.append(payload)
             return data
         }
 
         init(kind: Kind, flags: FrameFlags, width: Int, height: Int, captureMicros: UInt64, payload: Data,
-             streamID: UInt32 = 0, cornerRadius: UInt16 = 0) {
+             streamID: UInt32 = 0, cornerRadius: UInt16 = 0, windows: [UInt8]? = nil) {
             self.kind = kind
             self.flags = flags
             self.width = width
@@ -71,6 +80,7 @@ enum VideoStream {
             self.payload = payload
             self.streamID = streamID
             self.cornerRadius = cornerRadius
+            self.windows = windows
         }
 
         init?(decoding data: Data) {
@@ -88,9 +98,20 @@ enum VideoStream {
                 streamID = id
                 radius = corner
             }
+            var payloadStart = headerBytes
+            var windows: [UInt8]?
+            if kind == .winViewAccessUnit {
+                let bytes = [UInt8](data.dropFirst(headerBytes).prefix(4))
+                guard bytes.count == 4 else { return nil }
+                let length = Int(bytes[0]) | Int(bytes[1]) << 8 | Int(bytes[2]) << 16 | Int(bytes[3]) << 24
+                guard length <= data.count - headerBytes - 4 else { return nil }
+                windows = [UInt8](data.dropFirst(headerBytes + 4).prefix(length))
+                payloadStart = headerBytes + 4 + length
+                guard data.count > payloadStart else { return nil }
+            }
             self.init(kind: kind, flags: FrameFlags(rawValue: flags), width: Int(width), height: Int(height),
-                      captureMicros: micros, payload: Data(data.dropFirst(headerBytes)),
-                      streamID: streamID, cornerRadius: radius)
+                      captureMicros: micros, payload: Data(data.dropFirst(payloadStart)),
+                      streamID: streamID, cornerRadius: radius, windows: windows)
         }
     }
 

@@ -75,6 +75,7 @@ public enum MessageType : byte
     WinViewPointerEnter = 0x95,
     WinViewCursor = 0x96,
     WinViewPointerLeave = 0x97,
+    WinViewPointerRelease = 0x98,
 }
 
 /// <summary>Pozycja menu aplikacji Maca (numer = kolejność przeglądania, od 0).</summary>
@@ -390,6 +391,10 @@ public static class Frame
 
     /// <summary>Okna Windows na wirtualnym monitorze, od najwyższego (najwyżej 64).</summary>
     public static byte[] WinViewWindows(int displayWidth, int displayHeight, IReadOnlyList<WinWindow> windows)
+        => Make(MessageType.WinViewWindows, WinViewWindowsPayload(displayWidth, displayHeight, windows));
+
+    /// <summary>Treść WINVIEW_WINDOWS (także w klatce wideo kind 3).</summary>
+    public static byte[] WinViewWindowsPayload(int displayWidth, int displayHeight, IReadOnlyList<WinWindow> windows)
     {
         var buffer = new List<byte>(5 + windows.Count * 48);
         var scratch = new byte[4];
@@ -413,17 +418,20 @@ public static class Frame
             buffer.Add((byte)title.Length);
             buffer.AddRange(title);
         }
-        return Make(MessageType.WinViewWindows, buffer.ToArray());
+        return buffer.ToArray();
     }
 
-    /// <summary>Kursor Windows na wirtualnym monitorze (piksele) i kształt (numeracja CURSOR_SHAPE).</summary>
-    public static byte[] WinViewCursor(int x, int y, byte shape, bool visible)
+    /// <summary>
+    /// Kursor Windows na wirtualnym monitorze (piksele) i kształt (numeracja CURSOR_SHAPE);
+    /// <paramref name="buttons"/> – wciśnięty przycisk myszy (przeciąganie).
+    /// </summary>
+    public static byte[] WinViewCursor(int x, int y, byte shape, bool visible, bool buttons = false)
     {
         Span<byte> p = stackalloc byte[6];
         BinaryPrimitives.WriteUInt16LittleEndian(p, (ushort)Math.Clamp(x, 0, 65535));
         BinaryPrimitives.WriteUInt16LittleEndian(p[2..], (ushort)Math.Clamp(y, 0, 65535));
         p[4] = shape;
-        p[5] = visible ? (byte)1 : (byte)0;
+        p[5] = (byte)((visible ? 1 : 0) | (buttons ? 2 : 0));
         return Make(MessageType.WinViewCursor, p);
     }
 

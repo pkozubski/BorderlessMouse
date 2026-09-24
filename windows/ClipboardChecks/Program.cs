@@ -318,6 +318,10 @@ internal static class Program
         Expect(Frame.ParseWinViewReady(winReadyPayload.AsSpan(0, 30)) is null, "truncated WINVIEW_READY rejected");
         Expect(Frame.ParseWinViewPointerEnter(Hex("3412ffff")) == (0x1234, 0xFFFF), "WINVIEW_POINTER_ENTER from the Mac layout");
         Expect((byte)StatusFlags.WinViewSupported == 0x80, "WINVIEW status bit");
+        Expect(VideoStream.EncodeFrame(true, 800, 600, 5, Hex("0000000165"), [1, 2, 3]).SequenceEqual(Hex("0301200358020500000000000000030000000102030000000165")),
+            "WINVIEW frame with window list matches the Mac layout");
+        Expect(Frame.WinViewCursor(300, 200, 1, true, buttons: true).SequenceEqual(Hex("96062c01c8000103")), "WINVIEW_CURSOR buttons flag");
+        Expect(Enum.IsDefined(typeof(MessageType), (byte)0x98), "WINVIEW_POINTER_RELEASE is known");
         var fullFrame = VideoStream.EncodeFrame(true, 800, 600, 5, Hex("0000000165"));
         Expect(fullFrame.SequenceEqual(Hex("01012003580205000000000000000000000165")) && VideoStream.TryParseFrame(fullFrame, out var fullParsed)
                && fullParsed is { Width: 800, Height: 600, IsKeyframe: true, StreamId: 0 }, "full-display frame layout");

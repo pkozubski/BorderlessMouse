@@ -634,6 +634,9 @@ public partial class MainViewModel : ObservableObject
                 _winStreamer?.RequestKeyframe();
                 _winTracker?.Resend();
                 break;
+            case MessageType.WinViewPointerRelease:
+                if (_winViewRunning) _capture?.ReleaseWinView();
+                break;
             case MessageType.WinViewPointerEnter:
                 if (_winViewRunning && _winTracker is { } tracker && Frame.ParseWinViewPointerEnter(payload) is { } enter)
                 {
@@ -1033,6 +1036,8 @@ public partial class MainViewModel : ObservableObject
                 _winStreamer = new WinViewStreamer();
                 _winStreamer.Failed += message => Post(() => OnWinViewFailed(message));
             }
+            var tracker = _winTracker;
+            _winStreamer.WindowsSnapshot = tracker.SnapshotPayload;
             _winStreamer.Start(live.DeviceName, IPAddress.Parse(_client.RemoteAddress), info.Port, info.Key, info.Token);
             _winViewRunning = true;
             _winViewStatsClock.Restart();

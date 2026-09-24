@@ -156,7 +156,7 @@ final class WinViewReceiver {
                 return
             }
             guard let clear = self.opener.open(data), let frame = VideoStream.Frame(decoding: clear),
-                  frame.kind == .h264AccessUnit else {
+                  frame.kind == .h264AccessUnit || frame.kind == .winViewAccessUnit else {
                 self.close(L10n.text("Błąd integralności strumienia okien.", "Window stream integrity check failed."))
                 return
             }

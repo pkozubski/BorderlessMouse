@@ -636,6 +636,7 @@ final class Engine {
         let session = WinViewSession(screen: bounds, key: key, token: token)
         winView = session
         session.onKeyframeNeeded = { [weak self] in self?.server.send(Frame.winViewKeyframe()) }
+        session.onPointerRelease = { [weak self] x, y in self?.server.send(Frame.winViewPointerRelease(x: x, y: y)) }
         session.onClosed = { [weak self] reason in
             self?.eventsQueue.async {
                 guard let self, self.winViewGeneration == generation else { return }

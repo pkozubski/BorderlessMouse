@@ -40,6 +40,9 @@ public sealed class WinViewStreamer : IDisposable
     /// <summary>true = konwersja kolorów na GPU.</summary>
     public bool UsesGpu { get; private set; }
 
+    /// <summary>Lista okien z chwili nagrania (wątek strumienia); null = klatki bez listy.</summary>
+    public Func<byte[]>? WindowsSnapshot { get; set; }
+
     public void Start(string gdiDeviceName, IPAddress mac, int port, byte[] key, byte[] token)
     {
         Stop();
@@ -95,6 +98,8 @@ public sealed class WinViewStreamer : IDisposable
             {
                 var fresh = capture.Next(100);
                 if (!_running) break;
+                // Lista okien z tej samej chwili co obraz (zaraz po klatce z duplication).
+                var windows = fresh || _keyframeRequested ? WindowsSnapshot?.Invoke() : null;
                 if (!fresh && !(_keyframeRequested && capture.HasFrame)) continue;
                 if (encoder is null || encoder.Width != capture.Width || encoder.Height != capture.Height)
                 {
@@ -106,7 +111,7 @@ public sealed class WinViewStreamer : IDisposable
                 var force = _keyframeRequested;
                 _keyframeRequested = false;
                 if (encoder.Encode(capture.Nv12, now.Ticks, force) is not { } encoded) continue;
-                var clear = VideoStream.EncodeFrame(encoded.Keyframe, capture.Width, capture.Height, (ulong)(now.Ticks / 10), encoded.AnnexB);
+                var clear = VideoStream.EncodeFrame(encoded.Keyframe, capture.Width, capture.Height, (ulong)(now.Ticks / 10), encoded.AnnexB, windows);
                 var record = sealer.Seal(clear);
                 stream.Write(record);
                 Interlocked.Increment(ref _framesSent);

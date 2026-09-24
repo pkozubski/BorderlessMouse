@@ -70,6 +70,7 @@ enum MessageType: UInt8 {
     case winViewPointerEnter = 0x95
     case winViewCursor = 0x96
     case winViewPointerLeave = 0x97
+    case winViewPointerRelease = 0x98
 }
 
 /// Tryb ekranu wirtualnego po stronie Windows.
@@ -212,15 +213,17 @@ struct WinCursorUpdate: Equatable {
     let x: UInt16, y: UInt16
     let shape: UInt8
     let visible: Bool
+    /// Wciśnięty przycisk myszy (przeciąganie) – wtedy Mac nie oddaje kursora.
+    let buttons: Bool
 
-    init(x: UInt16, y: UInt16, shape: UInt8, visible: Bool) {
-        self.x = x; self.y = y; self.shape = shape; self.visible = visible
+    init(x: UInt16, y: UInt16, shape: UInt8, visible: Bool, buttons: Bool = false) {
+        self.x = x; self.y = y; self.shape = shape; self.visible = visible; self.buttons = buttons
     }
 
     init?(payload: [UInt8]) {
         var r = ByteReader(payload)
-        guard payload.count == 6, let x = r.u16(), let y = r.u16(), let shape = r.u8(), let visible = r.u8() else { return nil }
-        self.init(x: x, y: y, shape: shape, visible: visible != 0)
+        guard payload.count == 6, let x = r.u16(), let y = r.u16(), let shape = r.u8(), let flags = r.u8() else { return nil }
+        self.init(x: x, y: y, shape: shape, visible: flags & 1 != 0, buttons: flags & 2 != 0)
     }
 }
 
@@ -537,6 +540,14 @@ enum Frame {
     }
 
     static func winViewKeyframe() -> Data { make(.winViewKeyframe) }
+
+    /// Kursor Windows jest na Macu w miejscu, gdzie okno Windows jest zasłonięte albo go nie ma –
+    /// Windows oddaje sterowanie Macowi (jak po zejściu z okna).
+    static func winViewPointerRelease(x: UInt16, y: UInt16) -> Data {
+        var w = ByteWriter()
+        w.u16(x); w.u16(y)
+        return make(.winViewPointerRelease, w.bytes)
+    }
 
     /// Kursor sterowany z Windowsa wszedł na okno Windows (piksele wirtualnego monitora Windows).
     static func winViewPointerEnter(x: UInt16, y: UInt16) -> Data {

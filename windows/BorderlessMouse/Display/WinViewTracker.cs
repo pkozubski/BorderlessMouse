@@ -29,7 +29,7 @@ public sealed class WinViewTracker : IDisposable
     /// <summary>Prostokąty okien (współrzędne ekranu) z ostatnio wysłanej listy – do decyzji kursora.</summary>
     private volatile NativeMethods.RECT[] _rects = [];
     private IReadOnlyList<WinWindow> _lastWindows = [];
-    private (int x, int y, byte shape, bool visible)? _lastCursor;
+    private (int x, int y, byte shape, bool visible, bool buttons)? _lastCursor;
     private readonly Dictionary<IntPtr, byte> _cursorShapes = new();
 
     public WinViewTracker(NativeMethods.RECT monitor, Action<byte[]> send)
@@ -91,12 +91,11 @@ public sealed class WinViewTracker : IDisposable
 
     private void Run()
     {
-        var tick = 0;
         while (_running)
         {
             try
             {
-                if (tick++ % 2 == 0) PollWindows();
+                PollWindows();
                 PollCursor();
             }
             catch (Exception ex) when (ex is ExternalException or InvalidOperationException)
@@ -121,6 +120,12 @@ public sealed class WinViewTracker : IDisposable
         }).ToArray();
         _send(Frame.WinViewWindows(_monitor.Width, _monitor.Height, windows));
     }
+
+    /// <summary>
+    /// Lista okien w chwili nagrania klatki (wątek strumienia) – jedzie w tej samej klatce co
+    /// obraz, więc okno na Macu przesuwa się razem ze swoją zawartością.
+    /// </summary>
+    public byte[] SnapshotPayload() => Frame.WinViewWindowsPayload(_monitor.Width, _monitor.Height, Snapshot());
 
     private List<WinWindow> Snapshot()
     {
@@ -172,10 +177,11 @@ public sealed class WinViewTracker : IDisposable
             return;
         }
         var shape = _cursorShapes.TryGetValue(info.hCursor, out var known) ? known : (byte)0;
-        var current = (point.X - _monitor.Left, point.Y - _monitor.Top, shape, (info.flags & CURSOR_SHOWING) != 0);
+        var buttons = GetAsyncKeyState(VK_LBUTTON) < 0 || GetAsyncKeyState(VK_RBUTTON) < 0 || GetAsyncKeyState(VK_MBUTTON) < 0;
+        var current = (point.X - _monitor.Left, point.Y - _monitor.Top, shape, (info.flags & CURSOR_SHOWING) != 0, buttons);
         if (_lastCursor == current) return;
         _lastCursor = current;
-        _send(Frame.WinViewCursor(current.Item1, current.Item2, current.shape, current.Item4));
+        _send(Frame.WinViewCursor(current.Item1, current.Item2, current.shape, current.Item4, buttons));
     }
 
     // ---------------- Win32 ----------------
@@ -191,6 +197,10 @@ public sealed class WinViewTracker : IDisposable
     private const long WS_EX_APPWINDOW = 0x00040000L;
     private const uint GW_OWNER = 4;
     private const int CURSOR_SHOWING = 0x00000001;
+    private const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02, VK_MBUTTON = 0x04;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int key);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct CURSORINFO
