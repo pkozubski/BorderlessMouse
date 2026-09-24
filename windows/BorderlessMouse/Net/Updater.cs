@@ -36,6 +36,14 @@ public sealed class Updater
         return c;
     }
 
+    /// <summary>
+    /// Wersja testowa (workflow dev-build): aktualizuje się z wydania wstępnego „dev-build”,
+    /// sama i często. Zwykłe wydania czytają tylko releases/latest.
+    /// </summary>
+    public static bool IsDevChannel =>
+        Assembly.GetEntryAssembly()?.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Any(a => a.Key == "UpdateChannel" && a.Value == "dev") == true;
+
     public static string CurrentVersion
     {
         get
@@ -63,7 +71,8 @@ public sealed class Updater
     /// <summary>Zwraca najnowsze wydanie z zasobem dla Windows albo null, gdy brak wydań.</summary>
     public async Task<ReleaseInfo?> CheckAsync(CancellationToken ct)
     {
-        using var response = await Http.GetAsync($"https://api.github.com/repos/{Owner}/{Repo}/releases/latest", ct);
+        var path = IsDevChannel ? "releases/tags/dev-build" : "releases/latest";
+        using var response = await Http.GetAsync($"https://api.github.com/repos/{Owner}/{Repo}/{path}", ct);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
@@ -81,6 +90,12 @@ public sealed class Updater
             if (name == SignatureName) signature = url;
         }
         if (asset is null) return null;
+        if (IsDevChannel)
+        {
+            // Stały tag „dev-build” – numer wersji jest na końcu tytułu wydania.
+            var title = root.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            tag = title.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? tag;
+        }
         if (checksums is null) throw new InvalidDataException(T("Wydanie nie zawiera wymaganego pliku SHA256SUMS.txt.", "The release does not include the required SHA256SUMS.txt file."));
         if (signature is null) throw new InvalidDataException(T("Wydanie nie zawiera podpisu kryptograficznego aplikacji Windows.", "The release does not include a cryptographic signature for the Windows app."));
         return new ReleaseInfo(tag.TrimStart('v'), tag, notes, page, asset, checksums, signature);

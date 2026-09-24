@@ -23,6 +23,11 @@
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
+  <!-- Kanał aktualizacji wersji testowych (workflow dev-build.yml: -p:UpdateChannel=dev). -->
+  <ItemGroup Condition="'$(UpdateChannel)' != ''">
+    <AssemblyMetadata Include="UpdateChannel" Value="$(UpdateChannel)" />
+  </ItemGroup>
+
   <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
     <InternalsVisibleTo Include="BorderlessMouse.ClipboardChecks" />

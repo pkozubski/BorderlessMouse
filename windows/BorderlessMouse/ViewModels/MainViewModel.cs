@@ -315,7 +315,9 @@ public partial class MainViewModel : ObservableObject
             await Task.Delay(TimeSpan.FromSeconds(5));
             Post(() => { if (AutoCheckUpdates) _ = CheckUpdatesAsync(silent: true); });
         });
-        _updateTimer = new DispatcherTimer(TimeSpan.FromHours(6), DispatcherPriority.Background,
+        // Wersja testowa sprawdza często i instaluje sama – nie trzeba pobierać każdego buildu.
+        var interval = Updater.IsDevChannel ? TimeSpan.FromMinutes(2) : TimeSpan.FromHours(6);
+        _updateTimer = new DispatcherTimer(interval, DispatcherPriority.Background,
             (_, _) => { if (AutoCheckUpdates) _ = CheckUpdatesAsync(silent: true); });
         _updateTimer.Start();
     }
@@ -342,6 +344,8 @@ public partial class MainViewModel : ObservableObject
                 UpdateMessage = T($"Wersja {release.Version} jest gotowa do pobrania (masz {Updater.CurrentVersion}).", $"Version {release.Version} is ready to download (current {Updater.CurrentVersion}).");
                 UpdateStatusText = T($"Dostępna wersja {release.Version} · {release.PageUrl}", $"Version {release.Version} available · {release.PageUrl}");
                 Log(T($"Dostępna aktualizacja {release.Version}", $"Update {release.Version} is available"));
+                // Kanał testowy: od razu, ale nie gdy kursor jest na Macu (restart zabrałby sterowanie).
+                if (Updater.IsDevChannel && !CursorOnMac) _ = InstallUpdate();
             }
             else
             {
