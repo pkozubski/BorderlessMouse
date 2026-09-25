@@ -1,3 +1,5 @@
+import AppKit
+import CoreGraphics
 import Foundation
 
 /// Nieizolowany "silnik": łączy serwer TCP, discovery, wstrzykiwanie
@@ -15,6 +17,7 @@ final class Engine {
         var scrollPixelsPerNotch: Double
         var audioBufferFrames: UInt32
         var clipboardSync: Bool
+        var displayEnabled: Bool
         var pairingKey: Data
     }
 
@@ -32,6 +35,10 @@ final class Engine {
         case clipboardSent(summary: String)
         case clipboardReceived(summary: String)
         case clipboardError(String)
+        case displayStarted(String)
+        case displayStopped
+        case displayError(String)
+        case displayStats(DisplayStreamer.Stats)
         case log(String)
     }
 
@@ -52,6 +59,26 @@ final class Engine {
     private var accessibilityGranted = false
     private var audioGeneration: UInt64 = 0
     private let audioQueue = DispatchQueue(label: "blm.audio.control", qos: .userInitiated)
+    private let display = DisplayStreamer()
+    /// Ekran wirtualny: nil = brak, false = uruchamianie, true = działa.
+    private var displayRunning: Bool?
+    private var displayGeneration: UInt64 = 0
+    private var displayMode: DisplayMode = .fullscreen
+    /// Krawędź Maca zwrócona w stronę Windowsa (tam stoi ekran wirtualny).
+    private var displayEdge: ScreenEdge = .right
+    private var displayID: CGDirectDisplayID?
+    private let windowTracker = WindowTracker()
+    /// Tryb okien: ostatnia lista (do podnoszenia i zamykania okien z Windowsa).
+    private var trackedWindows: [UInt32: TrackedWindow] = [:]
+    private var sentIcons: Set<Int32> = []
+    /// Menu aplikacji wysłane do Windowsa – pozycje do wywołania po numerze.
+    private var menus: [Int32: [AXUIElement]] = [:]
+    private let menuQueue = DispatchQueue(label: "blm.display.menus", qos: .userInitiated)
+    private let cursorTracker = CursorTracker()
+    /// Okna Windows pokazywane na Macu (kierunek Windows → Mac).
+    private var winView: WinViewSession?
+    private var winViewEdge: ScreenEdge = .right
+    private var winViewGeneration: UInt64 = 0
 
     init(config: Config) {
         self.config = config
@@ -96,6 +123,8 @@ final class Engine {
         clipboard.stop()
         eventsQueue.sync {
             self.stopAudioLocked(notify: false)
+            self.stopDisplayLocked(notify: false, reason: nil)
+            self.stopWinViewLocked(reason: nil)
             self.injector.deactivate()
             self.discovery.stop()
             self.server.stop()
@@ -134,6 +163,10 @@ final class Engine {
             if self.tap != nil, old.muteLocalAudio != newConfig.muteLocalAudio || old.audioBufferFrames != newConfig.audioBufferFrames {
                 self.restartAudio()
             }
+            if old.displayEnabled && !newConfig.displayEnabled, self.displayRunning != nil {
+                self.stopDisplayLocked(notify: true, reason: L10n.text("Ekran wirtualny wyłączono na Macu.",
+                                                                      "The virtual display was turned off on the Mac."))
+            }
             if old.clipboardSync != newConfig.clipboardSync {
                 if newConfig.clipboardSync { self.clipboard.start() } else { self.clipboard.stop() }
             }
@@ -155,6 +188,12 @@ final class Engine {
 
     func stopAudio() {
         eventsQueue.async { self.stopAudioLocked(notify: true) }
+    }
+
+    func stopDisplay() {
+        eventsQueue.async {
+            self.stopDisplayLocked(notify: true, reason: L10n.text("Zatrzymano na Macu.", "Stopped on the Mac."))
+        }
     }
 
     /// Sprawdza (i w razie potrzeby wywołuje) zgodę na nagrywanie dźwięku
@@ -193,15 +232,44 @@ final class Engine {
             self.peer = nil
             self.injector.deactivate()
             self.stopAudioLocked(notify: true)
+            self.stopDisplayLocked(notify: true, reason: nil)
+            self.stopWinViewLocked(reason: nil)
             self.emit(.peerDisconnected)
             self.emit(.log(L10n.text("Rozłączono", "Disconnected")))
         }
         server.onMessage = { [weak self] type, payload, sessionKeys in
             self?.handle(type, payload, sessionKeys: sessionKeys)
         }
-        injector.onLeave = { [weak self] edge, ratio in
+        injector.onLeave = { [weak self] edge, ratio, fromVirtual in
             guard let self else { return }
-            self.server.send(Frame.leave(edge: edge, ratio: ratio))
+            self.server.send(Frame.leave(edge: edge, ratio: ratio, fromVirtualDisplay: fromVirtual))
+        }
+        injector.onVirtualDisplayFocus = { [weak self] focused in
+            self?.server.send(Frame.displayFocus(focused))
+        }
+        injector.onVirtualDrop = { [weak self] point in
+            guard let self, let id = self.displayID else { return }
+            let bounds = CGDisplayBounds(id)
+            self.server.send(Frame.windowHandoff(x: WindowTracker.normalize(point.x - bounds.minX, bounds.width - 1),
+                                                 y: WindowTracker.normalize(point.y - bounds.minY, bounds.height - 1)))
+        }
+        display.onStopped = { [weak self] message in
+            self?.eventsQueue.async {
+                guard let self, self.displayRunning != nil else { return }
+                self.stopDisplayLocked(notify: true, reason: message)
+            }
+        }
+        display.onStats = { [weak self] stats in
+            self?.eventsQueue.async { self?.emit(.displayStats(stats)) }
+        }
+        display.onDisplayChanged = { [weak self] in
+            self?.eventsQueue.async { self?.injector.refreshDisplays() }
+        }
+        injector.winViewHitTest = { [weak self] point in self?.winView?.hitTest(point) }
+        injector.onWinViewEnter = { [weak self] x, y in
+            guard let self, let session = self.winView else { return }
+            self.server.send(Frame.winViewPointerEnter(x: x, y: y))
+            session.pointerEntered()
         }
         injector.onActiveChanged = { [weak self] active in
             self?.emit(.cursorOnMac(active))
@@ -238,6 +306,11 @@ final class Engine {
         if accessibilityGranted { flags.insert(.accessibilityGranted) }
         if tap != nil { flags.insert(.audioCapturing) }
         if injector.isActive { flags.insert(.cursorOnMac) }
+        if VirtualDisplay.isSupported { flags.insert(.displaySupported) }
+        if config.displayEnabled { flags.insert(.displayEnabled) }
+        if displayRunning == true { flags.insert(.displayStreaming) }
+        if VirtualDisplay.isSupported { flags.insert(.windowModeSupported) }
+        flags.insert(.winViewSupported)
         server.send(Frame.status(flags))
     }
 
@@ -290,8 +363,312 @@ final class Engine {
         case .clipboard:
             guard config.clipboardSync, let content = ClipboardContent(payload: payload) else { return }
             clipboard.apply(content)
+        case .displayStart:
+            guard let request = DisplayStartRequest(payload: payload) else {
+                server.send(Frame.displayFailed(L10n.text("Nieprawidłowa prośba o ekran wirtualny.",
+                                                          "Invalid virtual display request.")))
+                return
+            }
+            startDisplay(request)
+        case .displayStop:
+            stopDisplayLocked(notify: true, reason: nil)
+        case .displayKeyframe:
+            display.requestKeyframe(streamID: r.u32())
+            windowTracker.resend()
+        case .windowRaise:
+            guard let id = r.u32(), let window = trackedWindows[id] else { return }
+            DispatchQueue.main.async { WindowControl.raise(windowID: id, pid: window.pid, frame: window.frame) }
+        case .windowClose:
+            guard let id = r.u32(), let window = trackedWindows[id] else { return }
+            DispatchQueue.main.async { WindowControl.close(windowID: id, pid: window.pid, frame: window.frame) }
+        case .windowResize:
+            guard let id = r.u32(), let width = r.u16(), let height = r.u16(), width > 0, height > 0,
+                  let window = trackedWindows[id], let displayID else { return }
+            let scale = WindowTracker.pixelScale(of: displayID)
+            let size = CGSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
+            DispatchQueue.main.async { WindowControl.resize(windowID: id, pid: window.pid, frame: window.frame, to: size) }
+        case .windowReturn:
+            guard let id = r.u32(), let ratio = r.f32(), let window = trackedWindows[id], let displayID else { return }
+            let edge = displayEdge
+            DispatchQueue.main.async {
+                WindowControl.returnToMac(windowID: id, pid: window.pid, frame: window.frame, edge: edge,
+                                          ratio: CGFloat(min(max(ratio, 0), 1)), excluding: displayID)
+            }
+        case .menuRequest:
+            guard let raw = r.u32(), displayMode == .windows else { return }
+            sendMenu(pid: Int32(bitPattern: raw))
+        case .menuInvoke:
+            guard let raw = r.u32(), let index = r.u16() else { return }
+            let pid = Int32(bitPattern: raw)
+            guard let item = menus[pid]?[safe: Int(index)] else { return }
+            DispatchQueue.main.async {
+                NSRunningApplication(processIdentifier: pid)?.activate()
+                MenuReader.invoke(item)
+            }
+        case .displayMode:
+            guard let raw = r.u8(), let mode = DisplayMode(rawValue: raw) else { return }
+            applyDisplayMode(mode)
+        case .windowEnter:
+            guard displayMode == .windows, let id = displayID, let x = r.u16(), let y = r.u16() else { return }
+            injector.windowEnter(at: WindowTracker.point(x: x, y: y, on: id))
+        case .mouseAbsolute:
+            guard let id = displayID, let x = r.u16(), let y = r.u16() else { return }
+            injector.windowMove(to: WindowTracker.point(x: x, y: y, on: id))
+        case .windowLeave:
+            injector.windowLeave(keepKeyboard: r.u8() == 1)
+        case .winViewStart:
+            guard let raw = r.u8(), let edge = ScreenEdge(rawValue: raw) else { return }
+            startWinView(edge: edge)
+        case .winViewStop:
+            stopWinViewLocked(reason: nil)
+        case .winViewWindows:
+            guard let list = WinWindowList(payload: payload) else { return }
+            winView?.update(list)
+        case .winViewCursor:
+            guard let update = WinCursorUpdate(payload: payload), !injector.isActive else { return }
+            winView?.cursor(update)
+        case .winViewPointerLeave:
+            guard let x = r.u16(), let y = r.u16(), let session = winView else { return }
+            guard config.inputEnabled, InputInjector.isAccessibilityTrusted else {
+                server.send(Frame.leave(edge: winViewEdge, ratio: 0.5))
+                return
+            }
+            injector.enter(at: session.macPoint(x: x, y: y), edge: winViewEdge)
         default:
             break
+        }
+    }
+
+    // MARK: - Ekran wirtualny (eventsQueue)
+
+    private func startDisplay(_ request: DisplayStartRequest) {
+        guard config.displayEnabled else {
+            server.send(Frame.displayFailed(L10n.text("Ekran wirtualny jest wyłączony na Macu.",
+                                                      "The virtual display is turned off on the Mac.")))
+            return
+        }
+        guard VirtualDisplay.isSupported else {
+            server.send(Frame.displayFailed(VirtualDisplay.DisplayError.unsupported.localizedDescription))
+            return
+        }
+        stopDisplayLocked(notify: false, reason: nil)
+        guard DisplayCapture.hasPermission else {
+            // Pytanie macOS pojawia się tylko raz; potem trzeba wejść do Ustawień.
+            DispatchQueue.main.async { DisplayCapture.requestPermission() }
+            let message = DisplayCapture.CaptureError.permissionDenied.localizedDescription
+            server.send(Frame.displayFailed(message))
+            emit(.displayError(message))
+            emit(.log(L10n.text("Ekran wirtualny: \(message)", "Virtual display: \(message)")))
+            return
+        }
+        displayGeneration &+= 1
+        let generation = displayGeneration
+        displayRunning = false
+        displayMode = request.mode
+        displayEdge = request.edge
+        let name = L10n.text("BorderlessMouse (\(peer?.name ?? "Windows"))", "BorderlessMouse (\(peer?.name ?? "Windows"))")
+        emit(.log(L10n.text("Tworzenie ekranu wirtualnego \(request.pixelWidth)×\(request.pixelHeight) (skala \(request.scalePercent)%)",
+                            "Creating a \(request.pixelWidth)×\(request.pixelHeight) virtual display (\(request.scalePercent)% scale)")))
+        display.start(request, name: name) { [weak self] result in
+            self?.eventsQueue.async {
+                guard let self, self.displayGeneration == generation, self.peer != nil else {
+                    if case .success = result { self?.display.stop() }
+                    return
+                }
+                switch result {
+                case let .success(ready):
+                    self.displayRunning = true
+                    self.displayID = ready.displayID
+                    self.injector.virtualDisplayID = ready.displayID
+                    self.applyDisplayMode(self.displayMode)
+                    self.evacuateRestoredWindows(displayID: ready.displayID, generation: generation)
+                    self.server.send(Frame.displayReady(status: 0, port: ready.port, key: ready.key, token: ready.token,
+                                                        pixelWidth: ready.width, pixelHeight: ready.height, message: ""))
+                    let desc = "\(ready.width)×\(ready.height) · H.264 \(ready.bitrate / 1_000_000) Mb/s"
+                    self.emit(.displayStarted(desc))
+                    self.emit(.log(L10n.text("Ekran wirtualny gotowy: \(desc), port \(ready.port)",
+                                             "Virtual display ready: \(desc), port \(ready.port)")))
+                case let .failure(error):
+                    self.displayRunning = nil
+                    let message = error.localizedDescription
+                    self.server.send(Frame.displayFailed(message))
+                    self.emit(.displayError(message))
+                    self.emit(.log(L10n.text("Ekran wirtualny: \(message)", "Virtual display: \(message)")))
+                }
+                self.sendStatus()
+            }
+        }
+    }
+
+    /// macOS przywraca na ekran wirtualny okna z poprzedniej sesji chwilę po jego
+    /// pojawieniu się – każda sesja ma startować pusta, więc odsyłamy je na Maca.
+    private func evacuateRestoredWindows(displayID: CGDirectDisplayID, generation: UInt64) {
+        for delay in [0.3, 1.2, 3.0] {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                let current = self.eventsQueue.sync { self.displayGeneration == generation && self.displayID == displayID }
+                guard current else { return }
+                let moved = WindowEvacuator.evacuate(from: displayID)
+                guard moved > 0 else { return }
+                self.eventsQueue.async {
+                    self.emit(.log(L10n.text("Przeniesiono na ekran Maca okna przywrócone przez macOS: \(moved)",
+                                             "Moved windows restored by macOS back to the Mac screen: \(moved)")))
+                }
+            }
+        }
+    }
+
+    /// Pełny pulpit albo same okna Maca na pulpicie Windows.
+    private func applyDisplayMode(_ mode: DisplayMode) {
+        displayMode = mode
+        guard displayRunning == true, let id = displayID else { return }
+        display.setMode(mode)
+        injector.handsOffDroppedWindows = mode == .windows
+        if mode == .windows {
+            windowTracker.start(displayID: id) { [weak self] windows in
+                self?.windowsChanged(windows, displayID: id)
+            }
+            let server = self.server
+            DispatchQueue.main.async { [cursorTracker] in
+                cursorTracker.onChange = { shape in server.send(Frame.cursorShape(shape.rawValue)) }
+                cursorTracker.start()
+            }
+        } else {
+            DispatchQueue.main.async { [cursorTracker] in cursorTracker.stop() }
+            windowTracker.stop()
+            trackedWindows = [:]
+            injector.windowLeave(keepKeyboard: false)
+        }
+        emit(.log(mode == .windows
+                  ? L10n.text("Ekran wirtualny: tryb okien", "Virtual display: window mode")
+                  : L10n.text("Ekran wirtualny: pełny pulpit", "Virtual display: full desktop")))
+    }
+
+    /// Kolejka trackera: strumienie okien, lista dla Windowsa i ikony nowych aplikacji.
+    private func windowsChanged(_ tracked: [TrackedWindow], displayID: CGDirectDisplayID) {
+        // Pasek menu Maca nie trafia na Windows – menu aplikacji jest w nagłówku jej okien.
+        let windows = tracked.filter { !$0.isMenuBar }
+        display.updateWindows(windows)
+        let descriptors = windows.map { WindowTracker.descriptor($0, on: displayID) }
+        let mode = CGDisplayCopyDisplayMode(displayID)
+        server.send(Frame.displayWindows(descriptors, displayWidth: mode?.pixelWidth ?? 0,
+                                         displayHeight: mode?.pixelHeight ?? 0))
+        eventsQueue.async {
+            self.trackedWindows = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let newApps = Set(windows.map(\.pid)).subtracting(self.sentIcons)
+            guard !newApps.isEmpty else { return }
+            self.sentIcons.formUnion(newApps)
+            newApps.forEach(self.sendMenu)
+            DispatchQueue.main.async {
+                for pid in newApps {
+                    if let png = WindowControl.iconPNG(pid: pid) { self.server.send(Frame.windowIcon(pid: pid, png: png)) }
+                }
+            }
+        }
+    }
+
+    /// Odczyt menu trwa (Accessibility pyta aplikację), więc poza eventsQueue.
+    private func sendMenu(pid: Int32) {
+        let swap = config.swapCtrlCmd
+        menuQueue.async { [weak self] in
+            guard let self, let snapshot = MenuReader.read(pid: pid, swapCtrlCmd: swap) else { return }
+            self.eventsQueue.async {
+                guard self.displayMode == .windows, self.displayRunning == true else { return }
+                self.menus[pid] = snapshot.items
+                self.server.send(Frame.windowMenu(pid: pid, payload: snapshot.payload))
+            }
+        }
+    }
+
+    /// `reason` != nil: Windows dostaje komunikat, że strumień się zakończył.
+    private func stopDisplayLocked(notify: Bool, reason: String?) {
+        displayGeneration &+= 1
+        guard displayRunning != nil else { return }
+        displayRunning = nil
+        displayID = nil
+        windowTracker.stop()
+        DispatchQueue.main.async { [cursorTracker] in cursorTracker.stop() }
+        trackedWindows = [:]
+        sentIcons = []
+        menus = [:]
+        injector.handsOffDroppedWindows = false
+        injector.windowLeave(keepKeyboard: false)
+        injector.virtualDisplayID = nil
+        display.stop()
+        if let reason, peer != nil { server.send(Frame.displayFailed(reason)) }
+        guard notify else { return }
+        if let reason {
+            emit(.displayError(reason))
+            emit(.log(L10n.text("Ekran wirtualny zatrzymany: \(reason)", "Virtual display stopped: \(reason)")))
+        } else {
+            emit(.displayStopped)
+            emit(.log(L10n.text("Ekran wirtualny zatrzymany", "Virtual display stopped")))
+        }
+        sendStatus()
+    }
+
+    // MARK: - Okna Windows na Macu (eventsQueue)
+
+    /// Ekran Maca przy krawędzi zwróconej w stronę Windowsa – tam pokazujemy okna Windows.
+    private static func facingScreen(edge: ScreenEdge, excluding virtual: CGDirectDisplayID?) -> CGDirectDisplayID {
+        // Nigdy ekran wirtualny Maca dla Windowsa – także gdy dopiero powstaje.
+        let all = VirtualDisplay.activeDisplays().filter { $0 != virtual && !VirtualDisplay.isOwn($0) }
+        guard !all.isEmpty else { return CGMainDisplayID() }
+        switch edge {
+        case .left: return all.min { CGDisplayBounds($0).minX < CGDisplayBounds($1).minX }!
+        case .right: return all.max { CGDisplayBounds($0).maxX < CGDisplayBounds($1).maxX }!
+        case .top: return all.min { CGDisplayBounds($0).minY < CGDisplayBounds($1).minY }!
+        case .bottom: return all.max { CGDisplayBounds($0).maxY < CGDisplayBounds($1).maxY }!
+        }
+    }
+
+    private func startWinView(edge: ScreenEdge) {
+        stopWinViewLocked(reason: nil)
+        winViewGeneration &+= 1
+        let generation = winViewGeneration
+        winViewEdge = edge
+        let screenID = Self.facingScreen(edge: edge, excluding: displayID)
+        let bounds = CGDisplayBounds(screenID)
+        let pixelWidth = CGDisplayCopyDisplayMode(screenID)?.pixelWidth ?? Int(bounds.width)
+        let scalePercent = Int((CGFloat(pixelWidth) / max(bounds.width, 1) * 100).rounded())
+        let key = VideoStream.randomBytes(VideoStream.keyBytes)
+        let token = VideoStream.randomBytes(VideoStream.tokenBytes)
+        let session = WinViewSession(screen: bounds, key: key, token: token)
+        winView = session
+        session.onKeyframeNeeded = { [weak self] in self?.server.send(Frame.winViewKeyframe()) }
+        session.onPointerRelease = { [weak self] x, y in self?.server.send(Frame.winViewPointerRelease(x: x, y: y)) }
+        session.onClosed = { [weak self] reason in
+            self?.eventsQueue.async {
+                guard let self, self.winViewGeneration == generation else { return }
+                self.stopWinViewLocked(reason: reason ?? "")
+            }
+        }
+        session.start { [weak self] result in
+            self?.eventsQueue.async {
+                guard let self, self.winViewGeneration == generation else { return }
+                switch result {
+                case let .success(port):
+                    self.server.send(Frame.winViewReady(status: 0, port: port, key: key, token: token,
+                                                        screenWidth: Int(bounds.width), screenHeight: Int(bounds.height),
+                                                        scalePercent: scalePercent, message: ""))
+                    self.emit(.log(L10n.text("Okna Windows: ekran \(Int(bounds.width))×\(Int(bounds.height)) pt, port \(port)",
+                                             "Windows apps: \(Int(bounds.width))×\(Int(bounds.height)) pt screen, port \(port)")))
+                case let .failure(error):
+                    self.stopWinViewLocked(reason: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// `reason` != nil: Windows dostaje komunikat o zakończeniu (pusty = bez opisu).
+    private func stopWinViewLocked(reason: String?) {
+        winViewGeneration &+= 1
+        guard let session = winView else { return }
+        winView = nil
+        session.stop()
+        if let reason, peer != nil {
+            server.send(Frame.winViewFailed(reason))
+            if !reason.isEmpty { emit(.log(L10n.text("Okna Windows: \(reason)", "Windows apps: \(reason)"))) }
         }
     }
 
@@ -391,4 +768,8 @@ final class Engine {
         t.resume()
         statsTimer = t
     }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }

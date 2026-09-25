@@ -13,6 +13,10 @@ Scenariusz, na który jest zbudowana ta wersja:
 * **Windows → Mac**: fizyczna klawiatura i mysz podpięte do Windowsa sterują Makiem
   (kursor przechodzi przez krawędź ekranu jak w Synergy/Barrier).
 * **Mac → Windows**: cały dźwięk systemowy Maca gra na słuchawkach/głośnikach Windowsa.
+* **Okna Maca na Windowsie** (eksperymentalne): przeciągnij okno na Macu w stronę Windowsa,
+  a pojawi się na pulpicie Windows obok zwykłych okien i będzie działać zwykłym kursorem.
+  Alternatywnie cały pulpit Maca na monitorze Windows.
+  Szczegóły w sekcji [Ekran wirtualny](#ekran-wirtualny-maca-na-windowsie).
 * **Schowek w obie strony**: kopiuj i wklejaj tekst, zdjęcia i zrzuty ekranu
   między komputerami (bez przełączania kursora). Zmiany wykrywamy co ok. 0,5 s;
   czas przesłania obrazu zależy od jego wielkości i sieci.
@@ -168,7 +172,8 @@ Aplikacja ma też ikonę w pasku menu z szybkimi przełącznikami.
    konta Windows i nie trafia do zwykłego pliku ustawień.
 3. Mac pojawi się na liście **Maki w sieci lokalnej** – wybierz go (albo wpisz IP) i **Połącz**.
 4. Ustaw, po której stronie ekranu stoi Mac (domyślnie *po lewej*) oraz wybierz skrót
-   awaryjny: **Scroll Lock**, **Pause/Break** albo **F12**.
+   awaryjny: **Scroll Lock**, **Pause/Break**, **F12** albo **Ctrl + Alt + Shift + B**
+   (dla klawiatur 60–75% bez Scroll Lock i Pause).
 5. Przesuń mysz przez tę krawędź – kursor przechodzi na Maca, a kursor Windows zostaje
    (ukryty) w miejscu przekroczenia. Ruch myszy jest czytany przez Raw Input, więc nie ma
    akceleracji Windows; tempo dostroisz suwakiem „Czułość myszy na Macu”. Powrót: przesuń
@@ -183,6 +188,98 @@ Aplikacja ma też ikonę w pasku menu z szybkimi przełącznikami.
 
 Ustawienia są zapisywane w `%APPDATA%\BorderlessMouse\settings.json`; zamknięcie okna chowa
 aplikację do zasobnika (wyjście przez menu ikony).
+
+### Ekran wirtualny Maca na Windowsie
+
+Mac tworzy dodatkowy, wirtualny monitor (bez sterownika) o rozdzielczości monitora Windows
+stojącego po stronie Maca i ustawia go przy krawędzi zwróconej do Windowsa. Obraz tego
+monitora jest nagrywany, kodowany sprzętowo do H.264 i wysyłany szyfrowanym połączeniem TCP.
+Windows dekoduje go na GPU (Media Foundation + Direct3D 11) i pokazuje na całym monitorze.
+
+Jak z tego korzystać:
+
+1. Na Macu nadaj zgodę **Nagrywanie ekranu** (karta Uprawnienia → Poproś) i uruchom aplikację
+   ponownie. Ekran wirtualny jest domyślnie włączony po obu stronach (karta Sterowanie).
+2. Połącz Windows z Makiem. Windows sam poprosi o ekran – na Macu pojawi się nowy monitor
+   „BorderlessMouse”, widoczny też w *Ustawienia systemowe → Wyświetlacze*.
+3. Przejdź kursorem z Windowsa na Maca jak zwykle (kursor trafia na ekran MacBooka).
+4. **Przeciągnij okno** (z wciśniętym przyciskiem myszy) przez krawędź w stronę Windowsa:
+   monitor Windowsa pokaże pulpit Maca z tym oknem. Zwykły ruch kursora bez przeciągania
+   wraca prosto do Windowsa, jak wcześniej.
+5. Dalsza krawędź ekranu wirtualnego (albo skrót awaryjny) wraca do Windowsa – obraz Maca
+   znika, a kursor Windows pojawia się tam, gdzie był na obrazie.
+
+**Tryb okien** (domyślny, przełącznik „Tylko okna Maca” na Windowsie): każde okno Maca,
+które przeciągniesz na ekran wirtualny, staje się zwykłym oknem Windows.
+
+* Wygląda jak na Macu: wygładzone zaokrąglone rogi (DirectComposition i Direct2D), własny pasek tytułu okna (czerwony, żółty i zielony
+  przycisk działają na Macu), a nad nim ciemny pasek menu aplikacji w stylu macOS (nazwa
+  aplikacji, Plik, Edycja, Widok…). Kliknięcie rozwija menu ze skrótami i wyszarzeniami,
+  a wybranie pozycji wywołuje ją na Macu. Pasek menu Maca nie jest potrzebny.
+* Po lewej stronie paska są przyciski okna jak w macOS (zamknij, minimalizuj, maksymalizuj) –
+  działają w każdej aplikacji, także tej, która ukrywa własne.
+* Za pusty fragment paska menu okno można przeciągnąć (także na inny monitor), a podwójne
+  kliknięcie maksymalizuje je na cały monitor (okno na Macu dostaje ten sam rozmiar).
+  Przeciągnięcie za pasek do krawędzi monitora po stronie Maca odsyła okno na MacBooka
+  razem z kursorem.
+  Rozmiar zmienia się też za krawędzie okna Maca.
+* Ma przycisk na pasku zadań (z ikoną aplikacji Maca), jest w Alt+Tab, da się je
+  zminimalizować i schować za innymi oknami. Zamknięcie zamyka je na Macu.
+* Obraz każdego okna jest nagrywany osobno, więc przesuwanie nie odsłania tapety.
+* Nad oknem Maca działa zwykły kursor Windows (bez opóźnienia obrazu), a jego kształt idzie
+  za Makiem: kursor tekstowy nad tekstem, rączka nad linkami, strzałki przy krawędziach okna.
+  Kliknięcia i przewijanie trafiają do Maca.
+* Klawiatura pisze w oknie Maca, gdy jest ono aktywne, jak w każdej aplikacji Windows.
+  Klawisz Win, Alt+Tab i Alt+F4 zawsze działają w Windowsie.
+* Okno wraca na MacBooka, gdy przeciągniesz je (za jego własny pasek tytułu) przez krawędź
+  monitora po stronie Maca.
+* Okna, które macOS przywróciłby na ekran wirtualny z poprzedniej sesji, wracają na MacBooka,
+  więc na Windowsie pojawia się tylko to, co przeniesiesz.
+* Mac nagrywa wyłącznie przeniesione okna. Dopóki żadnego nie przeniesiesz – albo gdy Windows
+  nie jest połączony – nic nie jest nagrywane, a macOS nie pokazuje wskaźnika udostępniania.
+
+W trybie całego pulpitu opcja **Pokazuj go przez cały czas sterowania Makiem** wyświetla
+pulpit Maca od razu po przejściu na Maca, nie dopiero po przeciągnięciu na niego okna.
+
+Dobrze wiedzieć:
+
+* Opóźnienie to czas kodowania (ok. 10 ms dla 2560×1440 na Apple Silicon), sieci i dekodowania.
+  Najlepiej działa po kablu; po Wi-Fi obraz może chwilami gubić płynność.
+* Nieruchomy ekran nie zużywa sieci. Przy ruchu 1440p to zwykle kilka–kilkanaście Mb/s,
+  maksymalnie ok. 22 Mb/s (4K: do 50 Mb/s).
+* Przy skalowaniu Windows 150% i więcej Mac domyślnie używa trybu HiDPI (ostry tekst,
+  większe elementy). Inny tryb wybierzesz w *Ustawienia systemowe → Wyświetlacze*.
+* `CGVirtualDisplay` to prywatne API macOS (używają go m.in. DeskPad i BetterDisplay).
+  Jeśli zniknie w przyszłej wersji systemu, reszta aplikacji działa dalej, a ekran wirtualny
+  zgłosi brak obsługi.
+* Zgoda na nagrywanie ekranu, podobnie jak zgoda na dźwięk, jest przypisana do podpisu
+  aplikacji – po zmianie podpisu (lokalny build ↔ wydanie z GitHuba) trzeba ją nadać ponownie.
+* Windows wymaga dekodera H.264 Media Foundation (jest w każdym Windows 10/11 poza
+  wersjami „N” bez Media Feature Pack). Bez sprzętowego dekodowania działa wolniejszy,
+  programowy tryb.
+
+Samotest na Macu (tworzy na chwilę monitor, sprawdza koder i szyfrowany kanał):
+`BorderlessMouse.app/Contents/MacOS/BorderlessMouse --display-selftest`.
+
+### Okna Windows na Macu
+
+W drugą stronę: przeciągnij okno Windows za krawędź po stronie Maca, a pojawi się na ekranie
+Maca jako zwykłe okno macOS – dalej działa w Windowsie, bez opóźnień myszy i klawiatury.
+
+* Wymaga jednorazowej instalacji darmowego, podpisanego sterownika
+  [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT).
+  Na Windowsie: *Sterowanie → Okna Windows na Macu → Zainstaluj* (pojawi się okno zgody
+  administratora). Instalator pobiera sterownik i narzędzie
+  [nefcon](https://github.com/nefarius/nefcon) z GitHuba, sprawdza ich sumy SHA-256
+  i zapisuje konfigurację w `C:\VirtualDisplayDriver`.
+* Monitor wirtualny jest podłączony tylko w czasie sesji (przy krawędzi po stronie Maca, w
+  rozmiarze ekranu Maca w punktach) i odłączany po niej, więc okna nie giną na niewidocznym
+  ekranie. Po awarii aplikacja odłącza go przy następnym uruchomieniu.
+* Zwykły ruch kursora przez krawędź nadal przełącza na Maca; na monitor wirtualny wjeżdża się
+  tylko, przeciągając okno. Nad oknem Windows na Macu kursor i klawiatura działają w Windowsie;
+  po zjechaniu z okna kursor steruje Makiem, a klawiatura zostaje w oknie Windows do pierwszego
+  kliknięcia na Macu. Przeciągnięcie okna z powrotem przez krawędź przenosi je na monitor Windows.
+* Sterownik usuniesz w *Menedżerze urządzeń → Karty graficzne → Virtual Display Driver*.
 
 ### Gry i pełny ekran
 
@@ -286,6 +383,7 @@ windows/
 * [NAudio](https://github.com/naudio/NAudio) (MIT) – WASAPI
 * [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) (MIT)
 * [Inter](https://github.com/rsms/inter) (SIL OFL 1.1) – krój pisma interfejsu Windows
+* [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT) i [nefcon](https://github.com/nefarius/nefcon) (MIT) – pobierane na żądanie przy instalacji monitora wirtualnego, nie są dołączone do aplikacji
 * ANGLE (licencja BSD) oraz SkiaSharp/HarfBuzzSharp (MIT) – natywne renderowanie Avalonia
 * Mechanika przełączania krawędzią i hooków wzorowana na Synergy/Barrier/Deskflow (GPL – kod nie jest kopiowany).
 
@@ -293,8 +391,10 @@ windows/
 
 * Schowek synchronizuje tekst i obrazy; nie przesyła plików ani formatowania tekstu.
   Animowane obrazy są przesyłane jako pojedyncza klatka PNG.
-* Kierunek tylko Windows → Mac (wejście) i Mac → Windows (dźwięk); protokół jest gotowy na
-  rozszerzenie o kierunek odwrotny.
+* Wejście płynie tylko z Windowsa do Maca (klawiatura i mysz Windows sterują oboma
+  komputerami); okna Windows na Macu obsługuje się myszą i klawiaturą Windows.
+* Okna Windows na Macu mają rozdzielczość ekranu Maca w punktach (tekst jest nieco mniej ostry
+  niż natywny Retina).
 * Caps Lock jest przekazywany jako zwykły klawisz – macOS może go ignorować.
 * Audio jest szyfrowane, ale nieskompresowane; przy 48 kHz stereo zużywa około 1,5 Mb/s.
 * Protokół v2 nie łączy się ze starszymi buildami korzystającymi z protokołu v1.

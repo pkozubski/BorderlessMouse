@@ -17,6 +17,8 @@ public enum EmergencyHotkey
     ScrollLock,
     Pause,
     F12,
+    /// <summary>Dla klawiatur bez Scroll Lock i Pause (np. 60–75%).</summary>
+    CtrlAltShiftB,
 }
 
 public sealed class Settings
@@ -39,6 +41,18 @@ public sealed class Settings
     public bool ExclusiveMode { get; set; }
 
     public bool ClipboardSyncEnabled { get; set; } = true;
+
+    /// <summary>Monitor po stronie Maca może wyświetlać wirtualny ekran Maca.</summary>
+    public bool DisplayEnabled { get; set; } = true;
+    /// <summary>false = ekran Maca tylko, gdy kursor jest na nim; true = przez cały czas sterowania Makiem.</summary>
+    public bool ShowMacDisplayWhileRemote { get; set; }
+    /// <summary>true = tylko okna Maca na pulpicie Windows; false = cały pulpit ekranu wirtualnego.</summary>
+    public bool DisplayWindowMode { get; set; } = true;
+
+    /// <summary>Okna Windows przeciągnięte za krawędź po stronie Maca pokazują się na Macu (Virtual Display Driver).</summary>
+    public bool WinViewEnabled { get; set; } = true;
+    /// <summary>Aplikacja podłączyła wirtualny monitor – po awarii odłączamy go przy starcie.</summary>
+    public bool WinViewAttached { get; set; }
 
     public bool AutoCheckUpdates { get; set; } = true;
 

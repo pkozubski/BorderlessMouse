@@ -8,7 +8,9 @@ account, display advertising, include analytics SDKs or send usage telemetry.
 ## Data processed locally
 
 When enabled, BorderlessMouse processes keyboard and mouse events, clipboard
-text or images, device names, local IP addresses and system audio. These data
+text or images, device names, local IP addresses, system audio and the picture
+of the Mac virtual display (only the virtual display, never the built-in or
+other physical Mac screens). These data
 are transmitted only between the paired Windows computer and Mac on the local
 network. The application does not intentionally send their contents to the
 developer or a cloud service.
@@ -23,6 +25,12 @@ If update checks are enabled, the application contacts the GitHub API and
 GitHub release hosting. GitHub receives ordinary connection metadata such as
 the public IP address and user agent. See GitHub's privacy statement for its
 processing. No clipboard, input or audio content is included in update checks.
+
+If you install the virtual monitor driver for Windows apps on the Mac, the Windows
+application downloads the Virtual Display Driver and nefcon releases from GitHub
+once, verifies their SHA-256 checksums and installs them with administrator
+approval. The contents of that virtual monitor are sent only to the paired Mac
+over the encrypted local connection.
 
 ## Diagnostics
 

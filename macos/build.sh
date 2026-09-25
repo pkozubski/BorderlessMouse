@@ -6,11 +6,18 @@
 #   UNIVERSAL=1 ./build.sh           → arm64 + x86_64 (lipo)
 #   VERSION=1.2.3 BUILD_NUMBER=42 ./build.sh
 #   SIGN_IDENTITY="BorderlessMouse Dev" ./build.sh   → stały certyfikat (trwałe uprawnienia TCC)
+#   bez SIGN_IDENTITY: certyfikat „Apple Development” z pęku kluczy, a gdy go nie ma – ad-hoc
 set -euo pipefail
 cd "$(dirname "$0")"
 
 ARCH="${ARCH:-$(uname -m)}"
 CONFIG="${CONFIG:-release}"
+if [ -z "${SIGN_IDENTITY:-}" ] && [ "${REQUIRE_STABLE_SIGNING:-0}" != "1" ]; then
+  # Lokalnie: stały certyfikat Apple Development (jeśli jest w pęku kluczy) sprawia,
+  # że zgody TCC (Dostępność, nagrywanie ekranu i dźwięku) przetrwają przebudowanie.
+  SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk -F'"' '/Apple Development:/ { print $2; exit }')"
+fi
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 if [ "${REQUIRE_STABLE_SIGNING:-0}" = "1" ] && [ "$SIGN_IDENTITY" = "-" ]; then
   echo "✗ Wydanie wymaga stałego certyfikatu; podpis ad-hoc zerwałby uprawnienia macOS." >&2
@@ -61,6 +68,8 @@ compile() { # $1 = arch, $2 = output
     -framework SwiftUI -framework AppKit -framework Network \
     -framework CoreAudio -framework AudioToolbox -framework CryptoKit \
     -framework ServiceManagement -framework Security \
+    -framework ScreenCaptureKit -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
+    -import-objc-header BorderlessMouse/Sources/Display/CGVirtualDisplay.h \
     -o "$2" $SOURCES
 }
 

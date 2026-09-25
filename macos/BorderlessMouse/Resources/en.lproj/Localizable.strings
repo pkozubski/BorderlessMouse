@@ -106,3 +106,9 @@
 "Zastosuj" = "Apply";
 "Zobacz wydanie na GitHubie" = "View release on GitHub";
 "Opcjonalny własny certyfikat" = "Optional custom certificate";
+"Ekran wirtualny" = "Virtual display";
+"Nagrywanie ekranu" = "Screen Recording";
+"Ekran wirtualny dla Windowsa" = "Virtual display for Windows";
+"Udostępniaj ekran wirtualny" = "Share a virtual display";
+"Monitor Windowsa staje się drugim ekranem Maca. Przeciągnij okno w stronę Windowsa, a pojawi się na jego ekranie." = "The Windows monitor becomes a second Mac display. Drag a window toward Windows and it appears on that screen.";
+"Stan" = "Status";

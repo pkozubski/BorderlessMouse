@@ -36,10 +36,20 @@ public enum MessageType : byte
     MouseMove = 0x10,
     MouseButton = 0x11,
     MouseWheel = 0x12,
+    MouseAbsolute = 0x13,
     Key = 0x20,
     ReleaseAll = 0x21,
     Enter = 0x30,
     Leave = 0x31,
+    WindowEnter = 0x32,
+    WindowLeave = 0x33,
+    WindowHandoff = 0x34,
+    WindowRaise = 0x35,
+    WindowClose = 0x36,
+    WindowResize = 0x37,
+    MenuInvoke = 0x38,
+    MenuRequest = 0x39,
+    WindowReturn = 0x3A,
     AudioStart = 0x40,
     AudioStop = 0x41,
     AudioFormat = 0x42,
@@ -47,7 +57,49 @@ public enum MessageType : byte
     Pong = 0x51,
     Status = 0x60,
     Clipboard = 0x70,
+    DisplayStart = 0x80,
+    DisplayStop = 0x81,
+    DisplayReady = 0x82,
+    DisplayKeyframe = 0x83,
+    DisplayFocus = 0x84,
+    DisplayMode = 0x85,
+    DisplayWindows = 0x86,
+    WindowIcon = 0x87,
+    WindowMenu = 0x88,
+    CursorShape = 0x89,
+    WinViewStart = 0x90,
+    WinViewReady = 0x91,
+    WinViewStop = 0x92,
+    WinViewKeyframe = 0x93,
+    WinViewWindows = 0x94,
+    WinViewPointerEnter = 0x95,
+    WinViewCursor = 0x96,
+    WinViewPointerLeave = 0x97,
+    WinViewPointerRelease = 0x98,
 }
+
+/// <summary>Pozycja menu aplikacji Maca (numer = kolejność przeglądania, od 0).</summary>
+public sealed record MacMenuItem(int Index, string Title, string Shortcut, bool Enabled, bool Separator, bool Checked,
+    IReadOnlyList<MacMenuItem> Children);
+
+/// <summary>Tryb ekranu wirtualnego: cały pulpit albo same okna Maca na pulpicie Windows.</summary>
+public enum DisplayMode : byte
+{
+    Fullscreen = 0,
+    Windows = 1,
+}
+
+/// <summary>Okno Maca na ekranie wirtualnym (piksele ekranu wirtualnego, może wystawać poza ekran).</summary>
+public sealed record MacWindow(uint Id, int Pid, int X, int Y, int Width, int Height, byte Flags, string Title)
+{
+    public const byte MenuBar = 0x01;
+    public const byte Popup = 0x02;
+    public bool IsMenuBar => (Flags & MenuBar) != 0;
+    public bool IsPopup => (Flags & Popup) != 0;
+}
+
+/// <summary>Lista okien Maca od najwyższego, z rozmiarem ekranu wirtualnego w pikselach.</summary>
+public sealed record MacWindowList(int DisplayWidth, int DisplayHeight, IReadOnlyList<MacWindow> Windows);
 
 public enum ScreenEdge : byte
 {
@@ -64,6 +116,35 @@ public enum StatusFlags : byte
     AccessibilityGranted = 1 << 0,
     AudioCapturing = 1 << 1,
     CursorOnMac = 1 << 2,
+    /// <summary>macOS potrafi utworzyć wirtualny monitor.</summary>
+    DisplaySupported = 1 << 3,
+    /// <summary>Użytkownik Maca zezwala na ekran wirtualny.</summary>
+    DisplayEnabled = 1 << 4,
+    DisplayStreaming = 1 << 5,
+    /// <summary>Mac obsługuje tryb okien.</summary>
+    WindowModeSupported = 1 << 6,
+    /// <summary>Mac pokazuje okna Windows (WINVIEW_*).</summary>
+    WinViewSupported = 1 << 7,
+}
+
+/// <summary>Okno Windows na wirtualnym monitorze (piksele tego monitora, może wystawać poza niego).</summary>
+public sealed record WinWindow(uint Id, int X, int Y, int Width, int Height, byte Flags, string Title)
+{
+    public const byte Foreground = 0x01;
+    public const byte Popup = 0x02;
+}
+
+/// <summary>Odpowiedź Maca na WINVIEW_START: odbiornik strumienia i ekran Maca (punkty, skala w %).</summary>
+public sealed record WinViewReadyInfo(byte Status, ushort Port, byte[] Key, byte[] Token, int ScreenWidth, int ScreenHeight,
+    int ScalePercent, string Message)
+{
+    public bool IsOk => Status == 0;
+}
+
+/// <summary>Odpowiedź Maca na DISPLAY_START (lub komunikat o zatrzymaniu, gdy Status != 0).</summary>
+public sealed record DisplayReadyInfo(byte Status, ushort Port, byte[] Key, byte[] Token, int Width, int Height, string Message)
+{
+    public bool IsOk => Status == 0;
 }
 
 public readonly record struct AudioFormatInfo(int SampleRate, int Channels, byte Format, byte Status, string Message)
@@ -219,6 +300,172 @@ public static class Frame
 
     public static byte[] AudioStop() => Make(MessageType.AudioStop, ReadOnlySpan<byte>.Empty);
 
+    /// <summary>Prośba o wirtualny monitor Maca o rozmiarze monitora Windows (piksele fizyczne).</summary>
+    public static byte[] DisplayStart(int width, int height, int scalePercent, ScreenEdge macEdgeFacingWindows,
+        uint maxBitrateKbps = 0, Protocol.DisplayMode mode = Protocol.DisplayMode.Fullscreen)
+    {
+        Span<byte> p = stackalloc byte[13];
+        BinaryPrimitives.WriteUInt16LittleEndian(p, (ushort)Math.Clamp(width, 320, 8192));
+        BinaryPrimitives.WriteUInt16LittleEndian(p[2..], (ushort)Math.Clamp(height, 240, 8192));
+        BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)Math.Clamp(scalePercent, 50, 400));
+        p[6] = (byte)macEdgeFacingWindows;
+        p[7] = 0; // H.264
+        BinaryPrimitives.WriteUInt32LittleEndian(p[8..], maxBitrateKbps);
+        p[12] = (byte)mode;
+        return Make(MessageType.DisplayStart, p);
+    }
+
+    public static byte[] SetDisplayMode(Protocol.DisplayMode mode) => Make(MessageType.DisplayMode, [(byte)mode]);
+
+    private static byte[] Point(MessageType type, ushort x, ushort y)
+    {
+        Span<byte> p = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt16LittleEndian(p, x);
+        BinaryPrimitives.WriteUInt16LittleEndian(p[2..], y);
+        return Make(type, p);
+    }
+
+    /// <summary>Kursor Windows wszedł nad okno Maca (punkt 0…65535 na ekranie wirtualnym).</summary>
+    public static byte[] WindowEnter(ushort x, ushort y) => Point(MessageType.WindowEnter, x, y);
+    public static byte[] MouseAbsolute(ushort x, ushort y) => Point(MessageType.MouseAbsolute, x, y);
+    /// <summary>Kursor zszedł z okna Maca; <paramref name="keepKeyboard"/> – klawiatura dalej pisze w tym oknie.</summary>
+    public static byte[] WindowLeave(bool keepKeyboard) => Make(MessageType.WindowLeave, [keepKeyboard ? (byte)1 : (byte)0]);
+
+    public static byte[] DisplayStop() => Make(MessageType.DisplayStop, ReadOnlySpan<byte>.Empty);
+    public static byte[] DisplayKeyframe() => Make(MessageType.DisplayKeyframe, ReadOnlySpan<byte>.Empty);
+
+    /// <summary>Klatka kluczowa jednego strumienia okna.</summary>
+    public static byte[] DisplayKeyframe(uint streamId)
+    {
+        Span<byte> p = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, streamId);
+        return Make(MessageType.DisplayKeyframe, p);
+    }
+
+    private static byte[] WindowCommand(MessageType type, uint id)
+    {
+        Span<byte> p = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, id);
+        return Make(type, p);
+    }
+
+    /// <summary>Okno Maca aktywowane na Windowsie – Mac wyciąga je na wierzch.</summary>
+    public static byte[] WindowRaise(uint id) => WindowCommand(MessageType.WindowRaise, id);
+    /// <summary>Alt+F4 / zamknięcie z paska zadań – Mac naciska przycisk zamknięcia okna.</summary>
+    public static byte[] WindowClose(uint id) => WindowCommand(MessageType.WindowClose, id);
+
+    /// <summary>Maksymalizacja lub zmiana rozmiaru ramką Windows (piksele ekranu wirtualnego).</summary>
+    public static byte[] WindowResize(uint id, int width, int height)
+    {
+        Span<byte> p = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, id);
+        BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)Math.Clamp(width, 1, 65535));
+        BinaryPrimitives.WriteUInt16LittleEndian(p[6..], (ushort)Math.Clamp(height, 1, 65535));
+        return Make(MessageType.WindowResize, p);
+    }
+
+    /// <summary>Okno przeciągnięte do krawędzi po stronie Maca wraca na ekran Maca (<paramref name="ratio"/> wzdłuż krawędzi).</summary>
+    public static byte[] WindowReturn(uint id, float ratio)
+    {
+        Span<byte> p = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, id);
+        BinaryPrimitives.WriteSingleLittleEndian(p[4..], ratio);
+        return Make(MessageType.WindowReturn, p);
+    }
+
+    public static byte[] MenuRequest(int pid) => WindowCommand(MessageType.MenuRequest, unchecked((uint)pid));
+
+    public static byte[] MenuInvoke(int pid, int index)
+    {
+        Span<byte> p = stackalloc byte[6];
+        BinaryPrimitives.WriteInt32LittleEndian(p, pid);
+        BinaryPrimitives.WriteUInt16LittleEndian(p[4..], (ushort)index);
+        return Make(MessageType.MenuInvoke, p);
+    }
+
+    // --- okna Windows na Macu ---
+
+    /// <summary>Prośba o pokazywanie okien Windows na Macu; <paramref name="macEdgeFacingWindows"/> wskazuje ekran Maca.</summary>
+    public static byte[] WinViewStart(ScreenEdge macEdgeFacingWindows) => Make(MessageType.WinViewStart, [(byte)macEdgeFacingWindows]);
+    public static byte[] WinViewStop() => Make(MessageType.WinViewStop, ReadOnlySpan<byte>.Empty);
+
+    /// <summary>Okna Windows na wirtualnym monitorze, od najwyższego (najwyżej 64).</summary>
+    public static byte[] WinViewWindows(int displayWidth, int displayHeight, IReadOnlyList<WinWindow> windows)
+        => Make(MessageType.WinViewWindows, WinViewWindowsPayload(displayWidth, displayHeight, windows));
+
+    /// <summary>Treść WINVIEW_WINDOWS (także w klatce wideo kind 3).</summary>
+    public static byte[] WinViewWindowsPayload(int displayWidth, int displayHeight, IReadOnlyList<WinWindow> windows)
+    {
+        var buffer = new List<byte>(5 + windows.Count * 48);
+        var scratch = new byte[4];
+        void U16(int value) { BinaryPrimitives.WriteUInt16LittleEndian(scratch, (ushort)Math.Clamp(value, 0, 65535)); buffer.Add(scratch[0]); buffer.Add(scratch[1]); }
+        void I32(int value) { BinaryPrimitives.WriteInt32LittleEndian(scratch, value); buffer.AddRange(scratch); }
+        U16(displayWidth);
+        U16(displayHeight);
+        var count = Math.Min(windows.Count, 64);
+        buffer.Add((byte)count);
+        for (var i = 0; i < count; i++)
+        {
+            var w = windows[i];
+            BinaryPrimitives.WriteUInt32LittleEndian(scratch, w.Id);
+            buffer.AddRange(scratch);
+            I32(w.X);
+            I32(w.Y);
+            U16(w.Width);
+            U16(w.Height);
+            buffer.Add(w.Flags);
+            var title = Utf8Prefix(w.Title, 120);
+            buffer.Add((byte)title.Length);
+            buffer.AddRange(title);
+        }
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Kursor Windows na wirtualnym monitorze (piksele) i kształt (numeracja CURSOR_SHAPE);
+    /// <paramref name="buttons"/> – wciśnięty przycisk myszy (przeciąganie).
+    /// </summary>
+    public static byte[] WinViewCursor(int x, int y, byte shape, bool visible, bool buttons = false)
+    {
+        Span<byte> p = stackalloc byte[6];
+        BinaryPrimitives.WriteUInt16LittleEndian(p, (ushort)Math.Clamp(x, 0, 65535));
+        BinaryPrimitives.WriteUInt16LittleEndian(p[2..], (ushort)Math.Clamp(y, 0, 65535));
+        p[4] = shape;
+        p[5] = (byte)((visible ? 1 : 0) | (buttons ? 2 : 0));
+        return Make(MessageType.WinViewCursor, p);
+    }
+
+    /// <summary>Kursor zszedł z okien Windows – Mac przejmuje sterowanie w tym punkcie monitora.</summary>
+    public static byte[] WinViewPointerLeave(int x, int y)
+        => Point(MessageType.WinViewPointerLeave, (ushort)Math.Clamp(x, 0, 65535), (ushort)Math.Clamp(y, 0, 65535));
+
+    private static byte[] Utf8Prefix(string value, int maxBytes)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        if (bytes.Length <= maxBytes) return bytes;
+        var length = maxBytes;
+        while (length > 0 && (bytes[length] & 0xC0) == 0x80) length--; // nie tniemy znaku UTF-8
+        return bytes[..length];
+    }
+
+    public static WinViewReadyInfo? ParseWinViewReady(ReadOnlySpan<byte> p)
+    {
+        const int fixedBytes = 1 + 2 + VideoStream.KeyBytes + VideoStream.TokenBytes + 2 + 2 + 2;
+        if (p.Length < fixedBytes || p.Length > fixedBytes + 200) return null;
+        var offset = 3;
+        var key = p.Slice(offset, VideoStream.KeyBytes).ToArray();
+        offset += VideoStream.KeyBytes;
+        var token = p.Slice(offset, VideoStream.TokenBytes).ToArray();
+        offset += VideoStream.TokenBytes;
+        return new WinViewReadyInfo(p[0], BinaryPrimitives.ReadUInt16LittleEndian(p[1..]), key, token,
+            BinaryPrimitives.ReadUInt16LittleEndian(p[offset..]), BinaryPrimitives.ReadUInt16LittleEndian(p[(offset + 2)..]),
+            BinaryPrimitives.ReadUInt16LittleEndian(p[(offset + 4)..]), Encoding.UTF8.GetString(p[fixedBytes..]));
+    }
+
+    /// <summary>WINVIEW_POINTER_ENTER: kursor Maca wjechał na okno Windows (piksele wirtualnego monitora).</summary>
+    public static (int x, int y)? ParseWinViewPointerEnter(ReadOnlySpan<byte> p)
+        => p.Length >= 4 ? (BinaryPrimitives.ReadUInt16LittleEndian(p), BinaryPrimitives.ReadUInt16LittleEndian(p[2..])) : null;
+
     public static byte[] Ping(ulong ts)
     {
         Span<byte> p = stackalloc byte[8];
@@ -235,6 +482,98 @@ public static class Frame
         if (p.Length < 5) return null;
         return ((ScreenEdge)p[0], BinaryPrimitives.ReadSingleLittleEndian(p[1..]));
     }
+
+    /// <summary>Opcjonalny szósty bajt LEAVE: bit 0 = kursor wyszedł z ekranu wirtualnego.</summary>
+    public static bool LeaveFromVirtualDisplay(ReadOnlySpan<byte> p) => p.Length >= 6 && (p[5] & 0x01) != 0;
+
+    public static DisplayReadyInfo? ParseDisplayReady(ReadOnlySpan<byte> p)
+    {
+        const int fixedBytes = 1 + 2 + VideoStream.KeyBytes + VideoStream.TokenBytes + 2 + 2;
+        if (p.Length < fixedBytes || p.Length > fixedBytes + 200) return null;
+        var offset = 3;
+        var key = p.Slice(offset, VideoStream.KeyBytes).ToArray();
+        offset += VideoStream.KeyBytes;
+        var token = p.Slice(offset, VideoStream.TokenBytes).ToArray();
+        offset += VideoStream.TokenBytes;
+        var width = BinaryPrimitives.ReadUInt16LittleEndian(p[offset..]);
+        var height = BinaryPrimitives.ReadUInt16LittleEndian(p[(offset + 2)..]);
+        var message = Encoding.UTF8.GetString(p[fixedBytes..]);
+        return new DisplayReadyInfo(p[0], BinaryPrimitives.ReadUInt16LittleEndian(p[1..]), key, token, width, height, message);
+    }
+
+    public static bool? ParseDisplayFocus(ReadOnlySpan<byte> p) => p.Length >= 1 ? p[0] != 0 : null;
+
+    public static MacWindowList? ParseDisplayWindows(ReadOnlySpan<byte> p)
+    {
+        if (p.Length < 5) return null;
+        var displayWidth = BinaryPrimitives.ReadUInt16LittleEndian(p);
+        var displayHeight = BinaryPrimitives.ReadUInt16LittleEndian(p[2..]);
+        int count = p[4], offset = 5;
+        var windows = new List<MacWindow>(count);
+        for (var i = 0; i < count; i++)
+        {
+            const int fixedBytes = 4 + 4 + 4 + 4 + 2 + 2 + 1 + 1;
+            if (p.Length < offset + fixedBytes) return null;
+            var r = p[offset..];
+            var titleLength = r[21];
+            if (p.Length < offset + fixedBytes + titleLength) return null;
+            windows.Add(new MacWindow(BinaryPrimitives.ReadUInt32LittleEndian(r), BinaryPrimitives.ReadInt32LittleEndian(r[4..]),
+                BinaryPrimitives.ReadInt32LittleEndian(r[8..]), BinaryPrimitives.ReadInt32LittleEndian(r[12..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(r[16..]), BinaryPrimitives.ReadUInt16LittleEndian(r[18..]),
+                r[20], Encoding.UTF8.GetString(r.Slice(fixedBytes, titleLength))));
+            offset += fixedBytes + titleLength;
+        }
+        return offset == p.Length && displayWidth > 0 && displayHeight > 0
+            ? new MacWindowList(displayWidth, displayHeight, windows) : null;
+    }
+
+    /// <summary>Menu aplikacji: <c>i32 pid</c>, potem rekurencyjna lista pozycji (patrz PROTOCOL.md).</summary>
+    public static (int pid, IReadOnlyList<MacMenuItem> items)? ParseWindowMenu(ReadOnlySpan<byte> p)
+    {
+        if (p.Length < 6) return null;
+        var pid = BinaryPrimitives.ReadInt32LittleEndian(p);
+        var offset = 4;
+        var index = 0;
+        var items = ParseMenuList(p, ref offset, ref index, 0);
+        return items is not null && offset == p.Length ? (pid, items) : null;
+    }
+
+    private static List<MacMenuItem>? ParseMenuList(ReadOnlySpan<byte> p, ref int offset, ref int index, int depth)
+    {
+        if (depth > 8 || p.Length < offset + 2) return null;
+        int count = BinaryPrimitives.ReadUInt16LittleEndian(p[offset..]);
+        offset += 2;
+        var list = new List<MacMenuItem>(Math.Min(count, 256));
+        for (var i = 0; i < count; i++)
+        {
+            if (p.Length < offset + 2) return null;
+            var flags = p[offset++];
+            int titleLength = p[offset++];
+            if (p.Length < offset + titleLength + 1) return null;
+            var title = Encoding.UTF8.GetString(p.Slice(offset, titleLength));
+            offset += titleLength;
+            int shortcutLength = p[offset++];
+            if (p.Length < offset + shortcutLength) return null;
+            var shortcut = Encoding.UTF8.GetString(p.Slice(offset, shortcutLength));
+            offset += shortcutLength;
+            var itemIndex = index++;
+            IReadOnlyList<MacMenuItem> children = Array.Empty<MacMenuItem>();
+            if ((flags & 8) != 0)
+            {
+                var sub = ParseMenuList(p, ref offset, ref index, depth + 1);
+                if (sub is null) return null;
+                children = sub;
+            }
+            list.Add(new MacMenuItem(itemIndex, title, shortcut, (flags & 1) != 0, (flags & 2) != 0, (flags & 4) != 0, children));
+        }
+        return list;
+    }
+
+    public static (int pid, byte[] png)? ParseWindowIcon(ReadOnlySpan<byte> p)
+        => p.Length > 4 ? (BinaryPrimitives.ReadInt32LittleEndian(p), p[4..].ToArray()) : null;
+
+    public static (ushort x, ushort y)? ParseWindowHandoff(ReadOnlySpan<byte> p)
+        => p.Length >= 4 ? (BinaryPrimitives.ReadUInt16LittleEndian(p), BinaryPrimitives.ReadUInt16LittleEndian(p[2..])) : null;
 
     public static AudioFormatInfo? ParseAudioFormat(ReadOnlySpan<byte> p)
     {

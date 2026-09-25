@@ -25,6 +25,8 @@ targets:
         PRODUCT_NAME: BorderlessMouse
         PRODUCT_BUNDLE_IDENTIFIER: com.borderlessmouse.mac
         INFOPLIST_FILE: BorderlessMouse/Info.plist
+        # Prywatne API wirtualnego monitora (słabo linkowane, patrz plik nagłówka).
+        SWIFT_OBJC_BRIDGING_HEADER: BorderlessMouse/Sources/Display/CGVirtualDisplay.h
         CODE_SIGN_ENTITLEMENTS: BorderlessMouse/BorderlessMouse.entitlements
         CODE_SIGN_STYLE: Automatic
         # Ad-hoc; w Xcode wybierz swój Team, żeby uprawnienia TCC nie znikały po każdym buildzie.

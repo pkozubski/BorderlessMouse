@@ -1,0 +1,75 @@
+name: Dev build
+
+# Wersja testowa z gałęzi funkcji: podpisany exe w wydaniu wstępnym „dev-build”.
+# Aplikacja zbudowana tym workflow (kanał „dev”) sama się do niego aktualizuje;
+# stabilny kanał czyta tylko releases/latest, więc wydań wstępnych nie widzi.
+on:
+  push:
+    branches: ["feature/virtual-display"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dev-build
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows (x64, dev channel)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore locked dependencies
+        run: dotnet restore windows/BorderlessMouse/BorderlessMouse.csproj -r win-x64 --locked-mode
+      - name: Publish
+        shell: pwsh
+        run: |
+          $version = "2.1.${{ github.run_number }}"
+          dotnet publish windows/BorderlessMouse/BorderlessMouse.csproj -c Release -r win-x64 `
+            --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:Version=$version -p:InformationalVersion="$version-dev" -p:UpdateChannel=dev --no-restore -o publish
+          Move-Item publish/BorderlessMouse.exe publish/BorderlessMouse-Windows-x64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-dev
+          path: publish/BorderlessMouse-Windows-x64.exe
+          if-no-files-found: error
+
+  release:
+    name: Dev release
+    needs: [windows]
+    runs-on: ubuntu-latest
+    environment: production-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-dev
+          path: dist
+      - name: Checksums and signature
+        env:
+          UPDATE_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_PEM }}
+        run: |
+          : "${UPDATE_SIGNING_PRIVATE_KEY_PEM:?Brak UPDATE_SIGNING_PRIVATE_KEY_PEM}"
+          cd dist
+          sha256sum BorderlessMouse-Windows-x64.exe > SHA256SUMS.txt
+          umask 077
+          key="$RUNNER_TEMP/borderlessmouse-update-signing.pem"
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$UPDATE_SIGNING_PRIVATE_KEY_PEM" > "$key"
+          openssl dgst -sha256 -sign "$key" -out BorderlessMouse-Windows-x64.exe.sig BorderlessMouse-Windows-x64.exe
+          openssl dgst -sha256 -verify ../security/update-signing-public.pem \
+            -signature BorderlessMouse-Windows-x64.exe.sig BorderlessMouse-Windows-x64.exe
+      - name: Publish dev-build pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete dev-build --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create dev-build --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "BorderlessMouse dev 2.1.${{ github.run_number }}" \
+            --notes "Wersja testowa z gałęzi ${GITHUB_REF_NAME} (${GITHUB_SHA::7}). Aplikacja z kanału testowego aktualizuje się do niej sama." \
+            dist/BorderlessMouse-Windows-x64.exe dist/BorderlessMouse-Windows-x64.exe.sig dist/SHA256SUMS.txt

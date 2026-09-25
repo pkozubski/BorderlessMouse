@@ -30,6 +30,7 @@ public sealed class ControlClient : IDisposable
     private byte[]? _clientNonce;
     private readonly object _gate = new();
     private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private readonly object _sendOrder = new();
     private volatile bool _connected;
     private int _disconnectSignalled;
 
@@ -120,17 +121,19 @@ public sealed class ControlClient : IDisposable
     }
 
     /// <summary>Szyfruje jedną kompletną ramkę aplikacyjną.</summary>
+    /// <summary>Bezpieczne wątkowo: licznik szyfrowania i kolejka wysyłki muszą mieć tę samą kolejność.</summary>
     public void Send(byte[] frame)
     {
         var session = _session;
         if (!_connected || session is null) return;
-        var envelope = session.Seal(frame);
-        if (envelope is null)
+        byte[]? envelope;
+        lock (_sendOrder)
         {
-            Disconnect(T("Wyczerpano licznik bezpiecznej sesji.", "The secure-session counter was exhausted."));
-            return;
+            // Mac odrzuca ramki z licznikiem nie po kolei – szyfrowanie i kolejka razem.
+            envelope = session.Seal(frame);
+            if (envelope is not null) SendRaw(Frame.Secure(envelope));
         }
-        SendRaw(Frame.Secure(envelope));
+        if (envelope is null) Disconnect(T("Wyczerpano licznik bezpiecznej sesji.", "The secure-session counter was exhausted."));
     }
 
     public void SendMouseMove(int dx, int dy) => Send(Frame.MouseMove(dx, dy));

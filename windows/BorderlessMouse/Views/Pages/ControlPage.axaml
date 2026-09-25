@@ -49,6 +49,60 @@
             <Border Classes="card">
                 <StackPanel Spacing="12">
                     <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="EKRAN MACA" />
+                    </StackPanel>
+                    <views:SettingRow Title="Pokazuj ekran wirtualny Maca"
+                                      Subtitle="Ten monitor staje się drugim ekranem Maca. Przeciągnij okno na Macu w stronę Windowsa, a pojawi się tutaj.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding DisplayEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Tylko okna Maca"
+                                      Subtitle="Okna Maca leżą na pulpicie Windows obok zwykłych okien. Wyłączone: cały pulpit Maca na monitorze.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding DisplayWindowMode}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Pokazuj go przez cały czas sterowania Makiem"
+                                      Subtitle="Tylko dla całego pulpitu. Wyłączone: pulpit Maca pojawia się dopiero, gdy przeciągniesz na niego okno.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding ShowMacDisplayWhileRemote}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Stan ekranu" Subtitle="{Binding DisplayStatsText}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Ellipse Width="8" Height="8" Fill="{Binding DisplayStatusBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding DisplayStatusText}" MaxWidth="300" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <Button Content="Uruchom ponownie" Command="{Binding RestartDisplayCommand}" IsEnabled="{Binding IsConnected}" />
+                        </StackPanel>
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
+                        <TextBlock Text="OKNA WINDOWS NA MACU" />
+                    </StackPanel>
+                    <views:SettingRow Title="Przenoś okna Windows na Maca"
+                                      Subtitle="Przeciągnij okno za krawędź po stronie Maca – pojawi się na ekranie Maca i dalej działa w Windowsie.">
+                        <ToggleSwitch Classes="compact" IsChecked="{Binding WinViewEnabled}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" IsVisible="{Binding WinViewDriverMissing}" />
+                    <views:SettingRow Title="Sterownik monitora wirtualnego" IsVisible="{Binding WinViewDriverMissing}"
+                                      Subtitle="Jednorazowa instalacja darmowego, podpisanego sterownika Virtual Display Driver (wymaga zgody administratora).">
+                        <Button Content="Zainstaluj" Command="{Binding InstallDisplayDriverCommand}" IsEnabled="{Binding !IsInstallingDriver}" />
+                    </views:SettingRow>
+                    <Rectangle Classes="divider" />
+                    <views:SettingRow Title="Stan" Subtitle="{Binding WinViewStatsText}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Ellipse Width="8" Height="8" Fill="{Binding WinViewStatusBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding WinViewStatusText}" MaxWidth="300" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </views:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <StackPanel Classes="sectionHeader">
                         <TextBlock Text="DŹWIĘK" />
                     </StackPanel>
                     <views:SettingRow Title="Odbieraj dźwięk z Maca"

@@ -9,5 +9,6 @@ swiftc -parse-as-library -swift-version 5 -framework CryptoKit -framework Securi
   macos/BorderlessMouse/Sources/Localization/L10n.swift \
   macos/BorderlessMouse/Sources/Protocol/Protocol.swift \
   macos/BorderlessMouse/Sources/Protocol/ClipboardContent.swift \
+  macos/BorderlessMouse/Sources/Protocol/VideoStream.swift \
   macos/tests/SecurityChecks.swift -o "$TEST_DIR/security-checks"
 "$TEST_DIR/security-checks"

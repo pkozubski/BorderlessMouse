@@ -47,6 +47,7 @@ public static class NativeMethods
     public const int VK_SCROLL = 0x91;
     public const int VK_PAUSE = 0x13;
     public const int VK_F12 = 0x7B;
+    public const int VK_B = 0x42;
 
     // okna / raw input
     public const uint WS_POPUP = 0x80000000;
@@ -269,6 +270,24 @@ public static class NativeMethods
     /// <summary>Rośnie przy każdej zmianie schowka – tania detekcja bez okna nasłuchującego.</summary>
     [DllImport("user32.dll")]
     public static extern uint GetClipboardSequenceNumber();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+
+    /// <summary>Czas od ostatniego użycia klawiatury lub myszy (także przekazywanego do Maca).</summary>
+    public static TimeSpan IdleTime()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        return GetLastInputInfo(ref info) ? TimeSpan.FromMilliseconds(unchecked((uint)Environment.TickCount - info.dwTime)) : TimeSpan.Zero;
+    }
 
     public static RECT MonitorRectAt(POINT pt)
     {

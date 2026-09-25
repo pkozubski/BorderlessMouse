@@ -69,6 +69,101 @@ struct SecurityChecks {
         alteredUpdateVector[0] ^= 1
         expect(!ArtifactSignature.verify(data: alteredUpdateVector, signatureData: updateSignature), "tampered release artifact rejected")
         expect(!ArtifactSignature.verify(data: updateVector, signatureData: Data(updateSignature.dropLast())), "truncated release signature rejected")
+        checkVirtualDisplayProtocol()
         print("✓ Security: pairing, encrypted sessions, replay protection and signed update artifacts")
+    }
+
+    static func checkVirtualDisplayProtocol() {
+        let request = DisplayStartRequest(pixelWidth: 2560, pixelHeight: 1440, scalePercent: 125, edge: .right,
+                                          maxBitrateKbps: 20_000, mode: .windows)
+        expect(request.payload == Array(data("000aa0057d000100204e000001")), "display start layout (shared with Windows)")
+        expect(DisplayStartRequest(payload: request.payload) == request, "display start round trip")
+        expect(DisplayStartRequest(payload: Array(request.payload.prefix(12)))?.mode == .fullscreen,
+               "display start without mode byte means full desktop")
+        let window = WindowDescriptor(id: 0x01020304, pid: 77, x: -10, y: 20, width: 800, height: 600,
+                                      flags: WindowDescriptor.popup, title: "Ąb")
+        expect(Frame.displayWindows([window], displayWidth: 1920, displayHeight: 1080)
+               == data("861e8007380401040302014d000000f6ffffff14000000200358020203c48462"), "display windows layout (shared with Windows)")
+        let windowFrame = VideoStream.Frame(kind: .windowAccessUnit, flags: [.keyframe], width: 800, height: 600, captureMicros: 5,
+                                            payload: Data([0, 0, 0, 1, 0x65]), streamID: 0x01020304, cornerRadius: 34)
+        expect(windowFrame.encoded() == data("02012003580205000000000000000403020122000000000165"), "window frame layout")
+        expect(VideoStream.Frame(decoding: windowFrame.encoded()) == windowFrame, "window frame round trip")
+        expect(Frame.windowIcon(pid: 77, png: Data([0x89, 0x50])) == data("87064d0000008950"), "window icon layout")
+        expect(Frame.cursorShape(1) == data("890101"), "cursor shape layout")
+        let menu = [UInt8](data("01000904506c696b00020001044e6f7779064374726c2b4e020000"))
+        expect(Frame.windowMenu(pid: 77, payload: menu) == data("88%02x4d00000001000904506c696b00020001044e6f7779064374726c2b4e020000".replacingOccurrences(of: "%02x", with: String(format: "%02x", 4 + menu.count))),
+               "window menu layout (shared with Windows)")
+        expect(Frame.windowHandoff(x: 0x1234, y: 0xFFFF) == data("34041234ffff".replacingOccurrences(of: "1234", with: "3412")),
+               "window handoff layout")
+        // Okna Windows na Macu (WINVIEW_*), wektory wspólne z Windows.
+        let winList = WinWindowList(payload: Array(data("941aae0653040104030201f6ffffff14000000200358020303c48462").dropFirst(2)))
+        expect(winList == WinWindowList(displayWidth: 1710, displayHeight: 1107, windows: [
+            WinWindowDescriptor(id: 0x01020304, x: -10, y: 20, width: 800, height: 600, flags: 3, title: "Ąb"),
+        ]), "WINVIEW_WINDOWS from the Windows layout")
+        expect(winList?.windows.first?.isForeground == true && winList?.windows.first?.isPopup == true, "WINVIEW_WINDOWS flags")
+        expect(WinWindowList(payload: Array(data("941aae0653040104030201f6ffffff14000000200358020303c48462").dropFirst(2).dropLast())) == nil, "truncated WINVIEW_WINDOWS rejected")
+        expect(winList.map { Data([0x94, 0x1a] + $0.payload) } == data("941aae0653040104030201f6ffffff14000000200358020303c48462"), "WINVIEW_WINDOWS round trip")
+        expect(WinCursorUpdate(payload: Array(data("2c01c8000101"))) == WinCursorUpdate(x: 300, y: 200, shape: 1, visible: true),
+               "WINVIEW_CURSOR from the Windows layout")
+        expect(Frame.winViewReady(status: 0, port: 50123, key: Data((0..<32).map { UInt8($0 * 7 & 0xFF) }), token: Data(repeating: 0x5A, count: 16),
+                                  screenWidth: 1710, screenHeight: 1107, scalePercent: 200, message: "ok")
+               == data("913b00cbc300070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d95a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5aae065304c8006f6b"), "WINVIEW_READY layout (shared with Windows)")
+        expect(Frame.winViewPointerEnter(x: 0x1234, y: 0xFFFF) == data("95043412ffff") && Frame.winViewKeyframe() == data("9300"),
+               "WINVIEW pointer enter and keyframe layouts")
+        expect(StatusFlags.winViewSupported.rawValue == 0x80, "WINVIEW status bit")
+        let winFrame = VideoStream.Frame(kind: .winViewAccessUnit, flags: [.keyframe], width: 800, height: 600, captureMicros: 5,
+                                         payload: Data([0, 0, 0, 1, 0x65]), windows: [1, 2, 3])
+        expect(winFrame.encoded() == data("0301200358020500000000000000030000000102030000000165") && VideoStream.Frame(decoding: winFrame.encoded()) == winFrame,
+               "WINVIEW frame with window list (shared with Windows)")
+        expect(WinCursorUpdate(payload: Array(data("2c01c8000103")))?.buttons == true, "WINVIEW_CURSOR buttons flag")
+        expect(Frame.winViewPointerRelease(x: 0x1234, y: 5) == data("980434120500"), "WINVIEW_POINTER_RELEASE layout")
+
+        var badCodec = request.payload
+        badCodec[7] = 9
+        expect(DisplayStartRequest(payload: badCodec) == nil, "unknown video codec rejected")
+        expect(DisplayStartRequest(payload: Array(request.payload.prefix(8))) == nil, "truncated display start rejected")
+
+        let key = Data((0..<32).map { UInt8($0 * 7 & 0xFF) })
+        let token = Data(repeating: 0x5A, count: VideoStream.tokenBytes)
+        let ready = Frame.displayReady(status: 0, port: 50123, key: key, token: token, pixelWidth: 2560, pixelHeight: 1440, message: "")
+        let readyPayload = Frame.parseSingle(ready)!.1
+        expect(readyPayload.count == 1 + 2 + 32 + 16 + 2 + 2, "display ready layout")
+        expect(Data(readyPayload[3..<35]) == key && Data(readyPayload[35..<51]) == token, "display ready carries key and token")
+        expect(Frame.parseSingle(Frame.displayFailed("x"))!.1.first == 1, "display failure status")
+
+        var sealer = VideoStream.Sealer(key: key)
+        let first = sealer.seal(Data("BorderlessMouse video vector".utf8))!
+        expect(first == data("34000000000000000000000036871e7baf0e68795351fe3aa757db1c7770d96fcdfc5ca5825e10e56bbecdbf5450f64c9f54fa2c4c9ccc41"),
+               "video record vector")
+        let second = sealer.seal(Data([1, 2, 3]))!
+        var opener = VideoStream.Opener(key: key)
+        expect(opener.open(first.dropFirst(4)) == Data("BorderlessMouse video vector".utf8), "video record opens")
+        var replay = opener
+        expect(replay.open(first.dropFirst(4)) == nil, "replayed video record rejected")
+        var tampered = Data(second.dropFirst(4))
+        tampered[tampered.count - 1] ^= 1
+        expect(opener.open(tampered) == nil, "tampered video record rejected")
+        expect(opener.open(second.dropFirst(4)) == Data([1, 2, 3]), "next video record opens")
+
+        let fixtureURL = URL(fileURLWithPath: "tests/fixtures/video.json")
+        guard let json = try? JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as? [String: Any],
+              let keyHex = json["keyHex"] as? String, let records = json["records"] as? [String],
+              let keyframes = json["keyframes"] as? [Bool] else {
+            expect(false, "video fixture readable")
+            return
+        }
+        var fixtureOpener = VideoStream.Opener(key: data(keyHex))
+        for (index, hex) in records.enumerated() {
+            let record = data(hex)
+            let length = Int(record[0]) | Int(record[1]) << 8 | Int(record[2]) << 16 | Int(record[3]) << 24
+            expect(length == record.count - 4, "fixture record \(index) length")
+            guard let clear = fixtureOpener.open(record.dropFirst(4)), let frame = VideoStream.Frame(decoding: clear) else {
+                expect(false, "fixture record \(index) decrypts")
+                return
+            }
+            expect(frame.kind == .h264AccessUnit && frame.width == 160 && frame.height == 96, "fixture frame \(index) header")
+            expect(frame.isKeyframe == keyframes[index], "fixture frame \(index) keyframe flag")
+            expect(frame.payload.starts(with: [0, 0, 0, 1]), "fixture frame \(index) is Annex B")
+        }
     }
 }

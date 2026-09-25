@@ -1,5 +1,60 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Mac virtual display on Windows** (experimental). macOS creates a driverless virtual display
+  (`CGVirtualDisplay`) next to the edge facing Windows, captures it with ScreenCaptureKit,
+  encodes it with hardware H.264 (VideoToolbox, low-latency rate control) and streams it over
+  a separate, one-time TCP connection encrypted with a per-stream AES-256-GCM key. Windows
+  decodes it with Media Foundation on the GPU (software fallback) and shows it full screen on
+  the monitor next to the Mac while the pointer is on the virtual display.
+- Protocol: `DISPLAY_START/STOP/READY/KEYFRAME/FOCUS` (0x80–0x84), new `STATUS` bits and an
+  optional flags byte in `LEAVE`. Windows only uses them when the Mac advertises support, so
+  mixed versions keep working.
+- macOS: Screen Recording permission row, "Share a virtual display" toggle and stream status;
+  `--display-selftest` diagnostic.
+- Windows: "Mac display" card with a toggle, "show it whenever you control the Mac" option,
+  status, throughput and restart.
+- **Window mode** (default): every Mac window dragged onto the virtual display becomes a real
+  Windows window styled like macOS — antialiased rounded corners (DirectComposition +
+  Direct2D/DirectWrite), the macOS pointer shape mirrored with Windows system cursors, the Mac window's own title bar, and a dark
+  macOS-style menu bar above it with the app's menu (read through Accessibility, with shortcuts
+  and disabled/checked states) instead of the Mac menu bar; dragging and double-click maximize
+  from that bar (the Mac window is resized to match), macOS-style close/minimize/maximize buttons
+  on the bar, and dragging the bar to the Mac-side edge sends the window back to the MacBook; tiny helper windows are skipped; taskbar button with the Mac
+  app icon, Alt+Tab, normal z-order, closing closes it on the Mac. Each window is captured independently (ScreenCaptureKit) and
+  streamed separately, so moving it never reveals the wallpaper and corners are rounded like on
+  macOS. The real Windows pointer drives it (absolute positions, clicks also activate the
+  Windows window), the keyboard follows the active window with Windows shortcuts kept local,
+  dropping a window hands the pointer to Windows, dragging it across the Mac-side edge returns
+  it to the MacBook. Windows restored by macOS from a previous session are moved back to the
+  MacBook. Nothing is captured until a window is moved (not even the whole virtual display).
+  New messages `MOUSE_ABSOLUTE`, `WINDOW_ENTER/LEAVE/HANDOFF/RAISE/CLOSE`,
+  `DISPLAY_MODE`, `DISPLAY_WINDOWS`, `WINDOW_ICON`, per-window video frames and STATUS bit 6.
+- **Windows apps on the Mac** (experimental, reverse direction). A one-time, admin-approved
+  install of the signed, MIT-licensed Virtual Display Driver (downloaded from GitHub with pinned
+  SHA-256 checksums) gives Windows a virtual monitor. The app attaches it next to the Mac-side
+  edge only during a session, sized like the Mac screen in points, and detaches it afterwards
+  (also after a crash). Dragging a window across that edge moves it onto the monitor; the Mac
+  shows each such window as a native macOS window in the same place (one DXGI Desktop
+  Duplication capture, NV12 on the GPU with a CPU fallback, Media Foundation H.264, the same
+  encrypted one-time video channel, VideoToolbox decoding into IOSurfaces cropped per window,
+  rounded corners). The Windows pointer stays local over those windows (the Mac mirrors it and
+  its shape), leaving them hands control to the Mac at that point, and moving the Mac pointer
+  onto one hands it back to Windows. Protocol: `WINVIEW_*` (0x90–0x97) and STATUS bit 7.
+- Windows: encrypted control frames are sealed and queued atomically, so frames sent from
+  several threads can no longer reach the Mac out of order.
+- Local macOS builds are signed with the Apple Development identity when available, so
+  privacy permissions survive rebuilds.
+- The virtual display is entered only while dragging (a mouse button is held); plain pointer
+  movement across that edge still returns to Windows.
+- Windows: `Ctrl + Alt + Shift + B` emergency shortcut for compact keyboards without
+  Scroll Lock or Pause.
+- Shared test vectors (CryptoKit ↔ .NET) and an H.264 fixture encoded on macOS that the Windows
+  checks decrypt and, on Windows, decode.
+
 ## 2.0.2 — 2026-09-04
 
 ### Fixed
